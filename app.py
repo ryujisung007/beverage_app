@@ -1,5 +1,5 @@
 """
-🧪 음료개발 AI 플랫폼 v7.1 — 6개 추가 개선
+🧪 음료개발 AI 플랫폼 v7.3 — AI이화학분석 자동화 + 정제수조정 수정
 """
 import streamlit as st
 import pandas as pd
@@ -16,7 +16,6 @@ except ImportError as e:
 
 st.set_page_config(page_title="🧪 음료개발 AI 플랫폼", page_icon="🧪", layout="wide")
 
-# ── 데이터 로드 ──
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "음료개발_데이터베이스_v4-1.xlsx")
 
 @st.cache_data
@@ -29,12 +28,8 @@ except:
     st.error("❌ 음료개발_데이터베이스_v4-1.xlsx 파일을 앱 폴더에 넣어주세요.")
     st.stop()
 
-df_type = DATA['음료유형분류']
-df_product = DATA['시장제품DB']
-df_ing = DATA['원료DB']
-df_spec = DATA['음료규격기준']
-df_process = DATA['표준제조공정_HACCP']
-df_guide = DATA['가이드배합비DB']
+df_type = DATA['음료유형분류']; df_product = DATA['시장제품DB']; df_ing = DATA['원료DB']
+df_spec = DATA['음료규격기준']; df_process = DATA['표준제조공정_HACCP']; df_guide = DATA['가이드배합비DB']
 
 for c in ['Brix(°)', 'pH', '산도(%)', '감미도(설탕대비)', '예상단가(원/kg)',
           '1%사용시 Brix기여(°)', '1%사용시 산도기여(%)', '1%사용시 감미기여']:
@@ -47,41 +42,37 @@ try:
 except:
     OPENAI_KEY = st.secrets.get("OPENAI_API_KEY", "")
 
-# [개선3] 원료 목록에 직접입력 옵션 추가
-ING_NAMES = ['(선택)', '✏️ 직접입력'] + df_ing['원료명'].tolist()
+ING_LIST = df_ing['원료명'].tolist()
 
-# ── 세션 초기화 ──
 for k, v in [('slots', init_slots()), ('history', []), ('product_name', ''), ('bev_type', ''),
              ('flavor', ''), ('volume', 500), ('container', 'PET'), ('target_price', 1500),
              ('ai_response', ''), ('generated_image', ''), ('concept_result', None),
-             ('edu_slots', init_slots())]:
+             ('edu_slots', init_slots()), ('ai_est_results', [])]:
     if k not in st.session_state:
         st.session_state[k] = v
 
-# ── [개선4] CSS — 헤더 100%↑(24px), 본문 16px ──
 st.markdown("""<style>
-.sim-header{background:#1a237e;color:white;padding:12px 18px;border-radius:6px;font-weight:bold;font-size:22px;margin-bottom:14px;}
-.grp-label{background:#fff9c4;padding:6px 14px;font-weight:bold;font-size:17px;border-left:5px solid #f9a825;margin:10px 0;border-radius:3px;}
-.hdr{font-size:14px !important;font-weight:800 !important;color:#1a237e !important;background:#e3f2fd;padding:5px 6px;border-radius:3px;text-align:center;line-height:2.0;}
-.cel{font-size:15px !important;color:#212121 !important;font-weight:500 !important;line-height:2.0;}
-.cnum{font-size:15px !important;color:#1565c0 !important;font-weight:700 !important;}
-.pass{color:#2e7d32;font-weight:bold;font-size:16px;}
-.fail{color:#c62828;font-weight:bold;font-size:16px;}
-.infot{color:#1565c0;font-weight:bold;font-size:15px;}
-.rrow{font-size:17px !important;padding:5px 0;line-height:2.0;}
-.edu-step{background:#f3e5f5;border-left:5px solid #9c27b0;padding:14px 18px;border-radius:5px;margin:10px 0;font-size:16px;}
-.edu-warn{background:#fff3e0;border-left:5px solid #ff9800;padding:10px 14px;border-radius:4px;margin:6px 0;font-size:15px;}
-.concept-box{background:#e8f5e9;border:2px solid #4caf50;border-radius:8px;padding:18px;margin:10px 0;}
-div[data-testid="stNumberInput"] input{font-size:15px !important;padding:6px 8px !important;color:#212121 !important;}
-div[data-testid="stSelectbox"] > div{font-size:15px !important;color:#212121 !important;}
-div[data-testid="stTextInput"] input{font-size:15px !important;}
-div[data-testid="stTextArea"] textarea{font-size:15px !important;}
+.sim-hdr{background:#1a237e;color:white;padding:12px 18px;border-radius:6px;font-weight:bold;font-size:22px;margin-bottom:14px}
+.grp-lbl{background:#fff9c4;padding:6px 14px;font-weight:bold;font-size:17px;border-left:5px solid #f9a825;margin:10px 0;border-radius:3px}
+.t-hdr{font-size:13px!important;font-weight:800!important;color:#1a237e!important;background:#e3f2fd;padding:5px 6px;border-radius:3px;text-align:center;line-height:2.0}
+.t-cel{font-size:14px!important;color:#212121!important;font-weight:500!important;line-height:2.0}
+.t-num{font-size:14px!important;color:#1565c0!important;font-weight:700!important}
+.t-cust{font-size:12px!important;color:#e65100!important;font-style:italic}
+.pass{color:#2e7d32;font-weight:bold;font-size:16px}
+.fail{color:#c62828;font-weight:bold;font-size:16px}
+.infot{color:#1565c0;font-weight:bold;font-size:15px}
+.rrow{font-size:17px!important;padding:5px 0;line-height:2.0}
+.edu-step{background:#f3e5f5;border-left:5px solid #9c27b0;padding:14px 18px;border-radius:5px;margin:10px 0;font-size:16px}
+.edu-warn{background:#fff3e0;border-left:5px solid #ff9800;padding:10px 14px;border-radius:4px;margin:6px 0;font-size:15px}
+.est-box{background:#e3f2fd;border:2px solid #1565c0;border-radius:8px;padding:14px;margin:10px 0}
+div[data-testid="stNumberInput"] input{font-size:15px!important;padding:6px 8px!important;color:#212121!important}
+div[data-testid="stSelectbox"] > div{font-size:14px!important;color:#212121!important}
+div[data-testid="stTextInput"] input{font-size:15px!important}
+div[data-testid="stTextArea"] textarea{font-size:15px!important}
 </style>""", unsafe_allow_html=True)
 
-# ── 사이드바 ──
 st.sidebar.title("🧪 음료개발 AI 플랫폼")
 st.sidebar.markdown("---")
-# [개선6] 첫 메뉴 = 컨셉→배합설계
 PAGES = ["🎯 컨셉→배합설계", "🧪 배합 시뮬레이터", "🧑‍🔬 AI 연구원 평가", "🎨 제품 이미지 생성",
          "🔄 역설계", "📊 시장분석", "🎓 교육용 실습", "📋 기획서/HACCP",
          "📑 식품표시사항", "🧫 시작 레시피", "📓 배합 히스토리"]
@@ -92,94 +83,178 @@ if st.session_state.product_name:
     st.sidebar.info(f"📦 {st.session_state.product_name}\n{st.session_state.bev_type} / {st.session_state.flavor}")
 
 
-# ================================================================
-# [개선6] PAGE 0: 마케팅 컨셉 → R&D 배합설계
-# ================================================================
+# ============================================================
+# 헬퍼: 안전한 원료 selectbox
+# ============================================================
+def safe_ingredient_picker(slot, idx, prefix="s"):
+    cur = slot.get('원료명', '')
+    is_custom = slot.get('is_custom', False)
+    if cur and cur in ING_LIST:
+        mode = 'db'
+    elif cur:
+        mode = 'custom'
+        slot['is_custom'] = True
+    else:
+        mode = 'none'
+    input_mode = st.radio("입력", ["DB검색", "직접입력"], index=1 if mode == 'custom' else 0,
+                          horizontal=True, label_visibility="collapsed", key=f"{prefix}m{idx}")
+    if input_mode == "DB검색":
+        options = [''] + ING_LIST
+        cur_idx = options.index(cur) if cur in options else 0
+        picked = st.selectbox("원료선택", options, index=cur_idx, label_visibility="collapsed",
+                              key=f"{prefix}sel{idx}", format_func=lambda x: "(원료 선택)" if x == '' else x)
+        if picked and picked != cur:
+            new_slot = fill_slot_from_db(EMPTY_SLOT.copy(), picked, df_ing, PH_COL)
+            new_slot['배합비(%)'] = slot.get('배합비(%)', 0)
+            new_slot['AI추천_원료명'] = slot.get('AI추천_원료명', '')
+            new_slot['AI추천_%'] = slot.get('AI추천_%', 0)
+            new_slot['AI용도특성'] = slot.get('AI용도특성', '')
+            return new_slot, True
+        elif not picked and cur:
+            return EMPTY_SLOT.copy(), True
+        return slot, False
+    else:
+        cname = st.text_input("원료명", cur if mode in ('custom', 'db') else "",
+                              label_visibility="collapsed", key=f"{prefix}txt{idx}", placeholder="원료명 직접 입력")
+        if cname and cname != cur:
+            new_slot = fill_slot_from_db(EMPTY_SLOT.copy(), cname, df_ing, PH_COL)
+            new_slot['배합비(%)'] = slot.get('배합비(%)', 0)
+            return new_slot, True
+        elif not cname and cur:
+            return EMPTY_SLOT.copy(), True
+        return slot, False
+
+
+# ============================================================
+# 헬퍼: 배합비 로딩 + 자동 이화학추정 (핵심!)
+# ============================================================
+def load_formulation_with_estimation(formulation_list, auto_estimate=True):
+    """AI/컨셉 배합비 리스트 → 슬롯 적용 + DB유사매칭 + 이화학 자동추정"""
+    new_slots = init_slots()
+    need_est = []  # AI추정 필요한 슬롯
+
+    for item in formulation_list:
+        i = int(item.get('슬롯', 1)) - 1
+        if i < 0 or i >= 19:
+            continue
+        nm = item.get('원료명', '')
+        pct = safe_float(item.get('배합비', 0))
+
+        # DB 유사매칭 시도
+        new_slots[i] = fill_slot_from_db(new_slots[i], nm, df_ing, PH_COL)
+        new_slots[i]['배합비(%)'] = pct
+        new_slots[i]['AI추천_원료명'] = nm
+        new_slots[i]['AI추천_%'] = pct
+        new_slots[i]['AI용도특성'] = item.get('용도특성', item.get('구분', ''))
+        new_slots[i] = calc_slot_contributions(new_slots[i])
+
+        # 이화학 전부 0이면 추정 대상
+        if new_slots[i].get('is_custom') and pct > 0:
+            bx = safe_float(new_slots[i].get('당도(Bx)', 0))
+            ac = safe_float(new_slots[i].get('산도(%)', 0))
+            sw = safe_float(new_slots[i].get('감미도', 0))
+            pr = safe_float(new_slots[i].get('단가(원/kg)', 0))
+            if bx == 0 and ac == 0 and sw == 0 and pr == 0:
+                need_est.append(i)
+
+    # 자동 AI 이화학추정
+    est_results = []
+    if auto_estimate and need_est and OPENAI_KEY:
+        for idx in need_est:
+            nm = new_slots[idx]['원료명']
+            try:
+                est = call_gpt_estimate_ingredient(OPENAI_KEY, nm)
+                new_slots[idx] = apply_estimation_to_slot(new_slots[idx], est)
+                est_results.append({'슬롯': idx+1, '원료명': nm, **est})
+            except:
+                pass
+
+    return new_slots, est_results
+
+
+# ============================================================
+# PAGE 0: 마케팅 컨셉 → R&D 배합설계
+# ============================================================
 def page_concept():
-    st.markdown('<div class="sim-header">🎯 마케팅 컨셉 → R&D 배합설계 (AI 음료연구원)</div>', unsafe_allow_html=True)
-    st.caption("마케팅 기획자로부터 받은 제품 컨셉을 붙여넣으면, R&D센터 음료연구원 AI가 배합표로 변환합니다.")
-
+    st.markdown('<div class="sim-hdr">🎯 마케팅 컨셉 → R&D 배합설계</div>', unsafe_allow_html=True)
+    st.caption("마케팅 기획자의 컨셉을 붙여넣으면, R&D 음료연구원 AI가 배합표로 변환합니다.")
     concept = st.text_area("📋 마케팅 컨셉 (복사/붙여넣기)", height=200,
-        placeholder="예시: 2030 여성 타겟, 비타민C 풍부한 자몽+레몬 상큼 음료, 저칼로리, 500ml PET, 편의점 유통, 가격대 1,500원, 산뜻한 후미...")
-
-    if st.button("🤖 R&D 음료연구원에게 전달 → 배합설계", type="primary", use_container_width=True):
-        if not OPENAI_KEY:
-            st.error("OpenAI API 키 필요"); return
-        if not concept.strip():
-            st.warning("컨셉을 입력해주세요."); return
-        with st.spinner("🧑‍🔬 R&D센터 음료연구원이 컨셉을 분석하고 배합표를 설계 중..."):
+        placeholder="예시: 2030 여성 타겟, 비타민C 풍부한 자몽+레몬 상큼 음료, 저칼로리...")
+    if st.button("🤖 R&D 음료연구원에게 전달", type="primary", use_container_width=True):
+        if not OPENAI_KEY: st.error("OpenAI API 키 필요"); return
+        if not concept.strip(): st.warning("컨셉을 입력하세요."); return
+        with st.spinner("🧑‍🔬 R&D센터 음료연구원이 컨셉 분석 + 배합설계 + 이화학분석 중..."):
             sample = ', '.join(df_ing['원료명'].sample(min(30, len(df_ing))).tolist())
             result = call_gpt_marketing_to_rd(OPENAI_KEY, concept, sample)
             st.session_state.concept_result = result
 
+            # ★ 배합비 + 자동 이화학추정
+            if result.get('formulation'):
+                new_slots, est_results = load_formulation_with_estimation(
+                    result['formulation'], auto_estimate=True)
+                st.session_state.slots = new_slots
+                st.session_state.ai_est_results = est_results
+                if result.get('bev_type'): st.session_state.bev_type = result['bev_type']
+                if result.get('flavor'): st.session_state.flavor = result['flavor']
+
     if st.session_state.concept_result:
         r = st.session_state.concept_result
         st.markdown("---")
-        # AI 분석 텍스트
         st.markdown(r.get('text', ''))
 
         if r.get('formulation'):
-            st.markdown("---")
-            st.markdown("### 📊 추천 배합표 (배합시뮬레이터 형식)")
-            form_df = pd.DataFrame(r['formulation'])
-            st.dataframe(form_df, use_container_width=True, hide_index=True)
+            st.markdown("### 📊 추천 배합표 (이화학분석 반영)")
+            # 현재 슬롯에서 활성 원료 표시
+            rows = []
+            for i, s in enumerate(st.session_state.slots[:19]):
+                if s.get('원료명') and safe_float(s.get('배합비(%)', 0)) > 0:
+                    rows.append({'No': i+1, '원료명': s['원료명'], '배합비(%)': round(s['배합비(%)'], 3),
+                                'Brix': s.get('당도(Bx)', 0), '산도(%)': s.get('산도(%)', 0),
+                                '감미도': s.get('감미도', 0), '단가(원/kg)': safe_float(s.get('단가(원/kg)', 0)),
+                                '당기여': round(s.get('당기여', 0), 2), 'DB매칭': '✅DB' if not s.get('is_custom') else '🤖AI추정'})
+            if rows:
+                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
-            # 주요원료 특장점
+            # AI 이화학 추정 결과 표시
+            if st.session_state.ai_est_results:
+                st.markdown('<div class="est-box">🤖 <b>AI 이화학분석 결과</b> (DB에 없는 원료 자동추정)</div>', unsafe_allow_html=True)
+                st.dataframe(pd.DataFrame(st.session_state.ai_est_results), use_container_width=True, hide_index=True)
+
             if r.get('ingredients_info'):
-                with st.expander("🔍 주요원료 및 사용시 특장점", expanded=True):
+                with st.expander("🔍 주요원료 특장점"):
                     for info in r['ingredients_info']:
-                        st.markdown(f"• **{info.get('원료명', '')}**: {info.get('사용이유', '')}")
+                        st.markdown(f"• **{info.get('원료명','')}**: {info.get('사용이유','')}")
 
-            # [개선5] 적용/CSV/저장 버튼
             bc1, bc2, bc3 = st.columns(3)
             with bc1:
-                if st.button("✅ 추천배합비 → 시뮬레이터 적용", type="primary", use_container_width=True):
-                    new_slots = init_slots()
-                    for item in r['formulation']:
-                        idx = int(item.get('슬롯', 1)) - 1
-                        if idx < 0 or idx >= 19:
-                            continue
-                        name = item.get('원료명', '')
-                        pct = safe_float(item.get('배합비', 0))
-                        new_slots[idx] = fill_slot_from_db(new_slots[idx], name, df_ing, PH_COL)
-                        if not new_slots[idx]['원료명']:
-                            new_slots[idx]['원료명'] = name
-                            new_slots[idx]['is_custom'] = True
-                        new_slots[idx]['배합비(%)'] = pct
-                        new_slots[idx]['AI추천_원료명'] = name
-                        new_slots[idx]['AI추천_%'] = pct
-                        new_slots[idx]['AI용도특성'] = item.get('용도특성', '')
-                        new_slots[idx] = calc_slot_contributions(new_slots[idx])
-                    st.session_state.slots = new_slots
-                    if r.get('bev_type'):
-                        st.session_state.bev_type = r['bev_type']
-                    if r.get('flavor'):
-                        st.session_state.flavor = r['flavor']
-                    st.success("✅ 배합표 적용 완료! 좌측 '배합 시뮬레이터'로 이동하세요.")
+                st.success("✅ 배합표 자동 적용됨! '배합 시뮬레이터'에서 확인하세요.")
             with bc2:
-                csv = form_df.to_csv(index=False).encode('utf-8-sig')
-                st.download_button("📥 CSV 다운로드", csv, "추천배합표.csv", "text/csv", use_container_width=True)
+                form_df = pd.DataFrame(rows) if rows else pd.DataFrame()
+                if not form_df.empty:
+                    csv = form_df.to_csv(index=False).encode('utf-8-sig')
+                    st.download_button("📥 CSV", csv, "추천배합표.csv", "text/csv", use_container_width=True)
             with bc3:
-                if st.button("💾 히스토리에 저장", use_container_width=True):
+                if st.button("💾 히스토리 저장", use_container_width=True):
                     st.session_state.history.append({
                         'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M'),
-                        'name': f"컨셉배합_{r.get('flavor', 'AI')}",
-                        'type': r.get('bev_type', ''), 'flavor': r.get('flavor', ''),
-                        'slots': [s.copy() for s in st.session_state.slots],
-                        'result': {}, 'notes': concept[:80]})
-                    st.success(f"✅ 히스토리 저장 ({len(st.session_state.history)}건)")
+                        'name': f"컨셉_{r.get('flavor','AI')}", 'type': r.get('bev_type',''),
+                        'flavor': r.get('flavor',''), 'slots': [s.copy() for s in st.session_state.slots],
+                        'result': calc_formulation(st.session_state.slots, st.session_state.volume),
+                        'notes': concept[:80] if concept else ''})
+                    st.success("✅ 저장")
 
 
-# ================================================================
-# PAGE 1: 배합 시뮬레이터 [개선2,3,4,5 모두 적용]
-# ================================================================
+# ============================================================
+# PAGE 1: 배합 시뮬레이터
+# ============================================================
 def page_simulator():
-    st.markdown('<div class="sim-header">🧪 음료 배합비 시뮬레이터</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sim-hdr">🧪 음료 배합비 시뮬레이터</div>', unsafe_allow_html=True)
 
-    # ── 헤더 설정 ──
+    # 헤더 설정
     h1, h2, h3, h4 = st.columns([1.5, 2, 1.5, 1.5])
     with h1:
-        st.session_state.product_name = st.text_input("📋 제품명", st.session_state.product_name or "사과과채음료_시제1호")
+        st.session_state.product_name = st.text_input("📋 제품명",
+            st.session_state.product_name or "사과과채음료_시제1호")
         bev_types = df_spec['음료유형'].dropna().tolist()
         bt_idx = bev_types.index(st.session_state.bev_type) if st.session_state.bev_type in bev_types else 0
         st.session_state.bev_type = st.selectbox("음료유형", bev_types, index=bt_idx)
@@ -197,202 +272,194 @@ def page_simulator():
         spec = get_spec(df_spec, st.session_state.bev_type)
         if spec:
             st.markdown("**📋 규격기준**")
-            st.markdown(f"Bx: {spec['Brix_min']}~{spec['Brix_max']}° · pH: {spec['pH_min']}~{spec['pH_max']}")
+            st.markdown(f"Bx {spec['Brix_min']}~{spec['Brix_max']}° · pH {spec['pH_min']}~{spec['pH_max']}")
 
-    # ── 버튼 ──
+    # 버튼
     st.markdown("---")
     bc1, bc2, bc3 = st.columns(3)
     with bc1:
         if st.button("🤖 AI 추천배합비 생성", use_container_width=True, type="primary"):
-            if not OPENAI_KEY:
-                st.error("OpenAI API 키 필요"); return
-            with st.spinner("🤖 AI 배합설계 중..."):
+            if not OPENAI_KEY: st.error("OpenAI API 키 필요"); return
+            with st.spinner("🤖 AI 배합설계 + 이화학분석 중..."):
                 sample = ', '.join(df_ing['원료명'].sample(min(30, len(df_ing))).tolist())
-                ai_form = call_gpt_ai_formulation(OPENAI_KEY, st.session_state.bev_type, st.session_state.flavor, sample)
+                ai_form = call_gpt_ai_formulation(OPENAI_KEY, st.session_state.bev_type,
+                                                   st.session_state.flavor, sample)
                 if ai_form:
-                    new = init_slots()
-                    for item in ai_form:
-                        i = int(item.get('슬롯', 1)) - 1
-                        if i < 0 or i >= 19:
-                            continue
-                        nm = item.get('원료명', '')
-                        new[i] = fill_slot_from_db(new[i], nm, df_ing, PH_COL)
-                        if not new[i]['원료명']:
-                            new[i]['원료명'] = nm
-                            new[i]['is_custom'] = True
-                        new[i]['배합비(%)'] = safe_float(item.get('배합비', 0))
-                        new[i]['AI추천_원료명'] = nm
-                        new[i]['AI추천_%'] = safe_float(item.get('배합비', 0))
-                        new[i] = calc_slot_contributions(new[i])
-                    st.session_state.slots = new
-                    st.success(f"✅ AI 추천배합 {len(ai_form)}종 적용")
+                    new_slots, est_results = load_formulation_with_estimation(ai_form, auto_estimate=True)
+                    st.session_state.slots = new_slots
+                    st.session_state.ai_est_results = est_results
                     st.rerun()
     with bc2:
         if st.button("📥 가이드배합비 불러오기", use_container_width=True):
-            st.session_state.slots = load_guide(df_guide, st.session_state.bev_type, st.session_state.flavor, df_ing, PH_COL)
+            st.session_state.slots = load_guide(df_guide, st.session_state.bev_type,
+                                                 st.session_state.flavor, df_ing, PH_COL)
             st.rerun()
     with bc3:
         if st.button("🔄 전체 초기화", use_container_width=True):
             st.session_state.slots = init_slots()
+            st.session_state.ai_est_results = []
             st.rerun()
 
-    # ── [개선4] 배합표 헤더 (확대) + [개선2] 기존표준→AI용도특성 ──
+    # ── 배합표 ──
     st.markdown("---")
-    hdr = st.columns([0.3, 2.2, 1.0, 0.7, 0.7, 2.0, 0.8, 0.7, 0.7, 0.7, 0.7])
-    for i, h in enumerate(['No', '원료명', '배합비(%)', 'AI%', 'Bx', '🤖 용도/특성', '산도', '감미', '단가', '당기여', 'g/kg']):
-        hdr[i].markdown(f'<div class="hdr">{h}</div>', unsafe_allow_html=True)
+    hdr = st.columns([0.4, 2.8, 1.0, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6])
+    for i, h in enumerate(['No', '원료명', '배합비(%)', 'Bx', '산도', '감미', '단가', '당기여', 'g/kg']):
+        hdr[i].markdown(f'<div class="t-hdr">{h}</div>', unsafe_allow_html=True)
 
-    # ── 20행 배합표 ──
     for group_name, group_rows in SLOT_GROUPS:
-        if group_name != '정제수':
-            st.markdown(f'<div class="grp-label">{group_name}</div>', unsafe_allow_html=True)
+        if group_name == '정제수':
+            ing_total = sum(safe_float(st.session_state.slots[j].get('배합비(%)', 0)) for j in range(19))
+            wp = round(max(0, 100 - ing_total), 3)
+            st.session_state.slots[19]['원료명'] = '정제수'
+            st.session_state.slots[19]['배합비(%)'] = wp
+            st.session_state.slots[19]['배합량(g/kg)'] = round(wp * 10, 1)
+            c = st.columns([0.4, 2.8, 1.0, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6])
+            c[0].markdown(f'<span class="t-cel">20</span>', unsafe_allow_html=True)
+            c[1].markdown(f'**💧 정제수**')
+            c[2].markdown(f'<span class="t-num">{wp:.3f}%</span>', unsafe_allow_html=True)
+            c[8].markdown(f'<span class="t-num">{wp*10:.1f}</span>', unsafe_allow_html=True)
+            continue
 
+        st.markdown(f'<div class="grp-lbl">{group_name}</div>', unsafe_allow_html=True)
         for rn in group_rows:
             idx = rn - 1
             s = st.session_state.slots[idx]
 
-            # 정제수 행 (20행)
-            if group_name == '정제수':
-                ing_total = sum(safe_float(st.session_state.slots[j].get('배합비(%)', 0)) for j in range(19))
-                wp = round(max(0, 100 - ing_total), 3)
-                st.session_state.slots[idx]['원료명'] = '정제수'
-                st.session_state.slots[idx]['배합비(%)'] = wp
-                st.session_state.slots[idx]['배합량(g/kg)'] = round(wp * 10, 1)
-                c = st.columns([0.3, 2.2, 1.0, 0.7, 0.7, 2.0, 0.8, 0.7, 0.7, 0.7, 0.7])
-                c[0].markdown(f'<span class="cel">{rn}</span>', unsafe_allow_html=True)
-                c[1].markdown(f'**💧 정제수**')
-                c[2].markdown(f'<span class="cnum">{wp:.3f}%</span>', unsafe_allow_html=True)
-                c[10].markdown(f'<span class="cnum">{wp*10:.1f}</span>', unsafe_allow_html=True)
-                continue
+            c = st.columns([0.4, 2.8, 1.0, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6])
+            c[0].markdown(f'<span class="t-cel">{rn}</span>', unsafe_allow_html=True)
 
-            c = st.columns([0.3, 2.2, 1.0, 0.7, 0.7, 2.0, 0.8, 0.7, 0.7, 0.7, 0.7])
-            c[0].markdown(f'<span class="cel">{rn}</span>', unsafe_allow_html=True)
-
-            # ── [개선3] 원료 선택 + 직접입력 통합 ──
+            # 원료명
             with c[1]:
-                cur = s.get('원료명', '')
-                if cur and cur in df_ing['원료명'].values:
-                    def_idx = ING_NAMES.index(cur)
-                elif cur and s.get('is_custom'):
-                    def_idx = 1  # ✏️ 직접입력
-                else:
-                    def_idx = 0  # (선택)
+                new_slot, changed = safe_ingredient_picker(s, idx, prefix="s")
+                if changed:
+                    if new_slot.get('원료명') and not safe_float(new_slot.get('배합비(%)', 0)):
+                        new_slot['배합비(%)'] = safe_float(s.get('배합비(%)', 0))
+                    st.session_state.slots[idx] = new_slot
+                    s = new_slot
 
-                picked = st.selectbox("원료", ING_NAMES, index=def_idx,
-                                      label_visibility="collapsed", key=f"i{idx}")
-
-                if picked == '✏️ 직접입력':
-                    cname = st.text_input("원료명", cur if s.get('is_custom') else "",
-                                          label_visibility="collapsed", key=f"ci{idx}",
-                                          placeholder="원료명 입력")
-                    if cname:
-                        st.session_state.slots[idx]['원료명'] = cname
-                        st.session_state.slots[idx]['is_custom'] = True
-                        s = st.session_state.slots[idx]
-                elif picked == '(선택)':
-                    # 공란 선택 → 슬롯 초기화 (사용자가 지울 수 있도록)
-                    if cur:
-                        st.session_state.slots[idx] = EMPTY_SLOT.copy()
-                        s = st.session_state.slots[idx]
-                elif picked != cur:
-                    st.session_state.slots[idx] = fill_slot_from_db(EMPTY_SLOT.copy(), picked, df_ing, PH_COL)
-                    s = st.session_state.slots[idx]
-
-            # 배합비(%)
+            # 배합비
             with c[2]:
-                pct = st.number_input("pct", 0.0, 100.0, float(s.get('배합비(%)', 0)), 0.1,
-                                      format="%.3f", label_visibility="collapsed", key=f"p{idx}")
-                st.session_state.slots[idx]['배합비(%)'] = pct
-
-            # AI추천%
-            ai_pct = s.get('AI추천_%', 0)
-            c[3].markdown(f'<span class="cnum">{ai_pct if ai_pct else ""}</span>', unsafe_allow_html=True)
-
-            # [개선3] 직접입력 원료 → 편집 가능 필드
-            if s.get('is_custom') and s.get('원료명'):
-                with c[4]:
-                    bx = st.number_input("Bx", 0.0, 100.0, float(s.get('당도(Bx)', 0)), 0.1,
-                                         label_visibility="collapsed", key=f"bx{idx}")
-                    st.session_state.slots[idx]['당도(Bx)'] = bx
-                    st.session_state.slots[idx]['Brix(°)'] = bx
-                    st.session_state.slots[idx]['1%Brix기여'] = round(bx / 100, 4) if bx else 0
-                # [개선2] AI 용도특성
-                c[5].markdown(f'<span class="cel">{s.get("AI용도특성", "")}</span>', unsafe_allow_html=True)
-                with c[6]:
-                    ac = st.number_input("ac", 0.0, 50.0, float(s.get('산도(%)', 0)), 0.01,
-                                         label_visibility="collapsed", key=f"ac{idx}")
-                    st.session_state.slots[idx]['산도(%)'] = ac
-                    st.session_state.slots[idx]['1%산도기여'] = round(ac / 100, 4) if ac else 0
-                with c[7]:
-                    sw = st.number_input("sw", 0.0, 50000.0, float(s.get('감미도', 0)), 0.1,
-                                         label_visibility="collapsed", key=f"sw{idx}")
-                    st.session_state.slots[idx]['감미도'] = sw
-                    st.session_state.slots[idx]['1%감미기여'] = round(sw / 100, 4) if sw else 0
-                with c[8]:
-                    pr = st.number_input("단가", 0, 500000, int(s.get('단가(원/kg)', 0)), 100,
-                                         label_visibility="collapsed", key=f"pr{idx}")
-                    st.session_state.slots[idx]['단가(원/kg)'] = pr
-            else:
-                c[4].markdown(f'<span class="cel">{s.get("당도(Bx)", 0)}</span>', unsafe_allow_html=True)
-                c[5].markdown(f'<span class="cel">{s.get("AI용도특성", "")}</span>', unsafe_allow_html=True)
-                c[6].markdown(f'<span class="cel">{s.get("산도(%)", 0)}</span>', unsafe_allow_html=True)
-                c[7].markdown(f'<span class="cel">{s.get("감미도", 0)}</span>', unsafe_allow_html=True)
-                c[8].markdown(f'<span class="cel">{safe_float(s.get("단가(원/kg)", 0)):,.0f}</span>', unsafe_allow_html=True)
+                new_pct = st.number_input("pct", 0.0, 100.0, float(s.get('배합비(%)', 0)),
+                                          0.1, format="%.3f", label_visibility="collapsed", key=f"pct{idx}")
+                st.session_state.slots[idx]['배합비(%)'] = new_pct
 
             st.session_state.slots[idx] = calc_slot_contributions(st.session_state.slots[idx])
             s = st.session_state.slots[idx]
-            c[9].markdown(f'<span class="cnum">{s.get("당기여", 0):.2f}</span>', unsafe_allow_html=True)
-            c[10].markdown(f'<span class="cnum">{s.get("배합량(g/kg)", 0):.1f}</span>', unsafe_allow_html=True)
 
-    # ── [개선2] AI 용도특성 일괄조회 + [개선3] AI 이화학추정 ──
-    custom_idxs = [i for i, s in enumerate(st.session_state.slots) if s.get('is_custom') and s.get('원료명')]
-    active_idxs = [i for i, s in enumerate(st.session_state.slots[:19]) if s.get('원료명') and safe_float(s.get('배합비(%)', 0)) > 0]
+            bx = s.get('당도(Bx)', 0); ac = s.get('산도(%)', 0)
+            sw = s.get('감미도', 0); pr = safe_float(s.get('단가(원/kg)', 0))
+            css = 't-cust' if s.get('is_custom') else 't-cel'
 
-    if OPENAI_KEY:
-        ab1, ab2 = st.columns(2)
-        with ab1:
-            if active_idxs and st.button("🔍 AI 원료 용도/특성 일괄조회", use_container_width=True):
-                prog = st.progress(0)
-                for pi, i in enumerate(active_idxs):
-                    nm = st.session_state.slots[i].get('원료명', '')
-                    if nm and not st.session_state.slots[i].get('AI용도특성'):
-                        try:
-                            info = call_gpt_ingredient_info(OPENAI_KEY, nm)
-                            st.session_state.slots[i]['AI용도특성'] = info
-                        except:
-                            pass
-                    prog.progress((pi + 1) / len(active_idxs))
+            c[3].markdown(f'<span class="{css}">{bx}</span>', unsafe_allow_html=True)
+            c[4].markdown(f'<span class="{css}">{ac}</span>', unsafe_allow_html=True)
+            c[5].markdown(f'<span class="{css}">{sw}</span>', unsafe_allow_html=True)
+            c[6].markdown(f'<span class="{css}">{pr:,.0f}</span>', unsafe_allow_html=True)
+            c[7].markdown(f'<span class="t-num">{s.get("당기여",0):.2f}</span>', unsafe_allow_html=True)
+            c[8].markdown(f'<span class="t-num">{s.get("배합량(g/kg)",0):.1f}</span>', unsafe_allow_html=True)
+
+    # ── [핵심] AI 이화학분석 + 결과 출력 + 정제수 조정 ──
+    st.markdown("---")
+    custom_zero = [i for i in range(19) if st.session_state.slots[i].get('is_custom')
+                   and st.session_state.slots[i].get('원료명')
+                   and safe_float(st.session_state.slots[i].get('배합비(%)', 0)) > 0
+                   and safe_float(st.session_state.slots[i].get('당도(Bx)', 0)) == 0
+                   and safe_float(st.session_state.slots[i].get('산도(%)', 0)) == 0
+                   and safe_float(st.session_state.slots[i].get('감미도', 0)) == 0
+                   and safe_float(st.session_state.slots[i].get('단가(원/kg)', 0)) == 0]
+
+    custom_all = [i for i in range(19) if st.session_state.slots[i].get('is_custom')
+                  and st.session_state.slots[i].get('원료명')
+                  and safe_float(st.session_state.slots[i].get('배합비(%)', 0)) > 0]
+
+    col_ai, col_water = st.columns(2)
+
+    # AI 이화학분석 버튼
+    with col_ai:
+        if custom_zero and OPENAI_KEY:
+            names = ', '.join([st.session_state.slots[i]['원료명'] for i in custom_zero])
+            st.warning(f"⚠️ 이화학데이터 없음: {names}")
+            if st.button(f"🤖 AI 이화학분석 실행 ({len(custom_zero)}종)", type="primary", use_container_width=True):
+                bar = st.progress(0)
+                est_results = []
+                for pi, ci in enumerate(custom_zero):
+                    nm = st.session_state.slots[ci]['원료명']
+                    try:
+                        est = call_gpt_estimate_ingredient(OPENAI_KEY, nm)
+                        st.session_state.slots[ci] = apply_estimation_to_slot(st.session_state.slots[ci], est)
+                        est_results.append({'슬롯': ci+1, '원료명': nm, **est})
+                    except Exception as e:
+                        est_results.append({'슬롯': ci+1, '원료명': nm, '오류': str(e)})
+                    bar.progress((pi+1) / len(custom_zero))
+                st.session_state.ai_est_results = est_results
                 st.rerun()
-        with ab2:
-            if custom_idxs and st.button("🤖 직접입력 원료 → AI 이화학추정", use_container_width=True):
-                results = []
-                for ci in custom_idxs:
-                    s = st.session_state.slots[ci]
-                    with st.spinner(f"'{s['원료명']}' 추정 중..."):
+        elif custom_all:
+            st.info(f"✅ 직접입력 원료 {len(custom_all)}종 이화학 반영됨")
+        else:
+            st.info("✅ 전체 원료 DB 매칭 완료")
+
+    # [문제3,5] 정제수 조정 버튼 — 합계 100 초과/미만 모두 대응
+    with col_water:
+        ing_tot = sum(safe_float(st.session_state.slots[j].get('배합비(%)', 0)) for j in range(19))
+        total_with_water = ing_tot + safe_float(st.session_state.slots[19].get('배합비(%)', 0))
+
+        if abs(total_with_water - 100) > 0.01:
+            water_target = round(max(0, 100 - ing_tot), 3)
+            if ing_tot > 100:
+                st.error(f"⚠️ 원료합계 {ing_tot:.3f}% > 100%. 정제수=0으로 조정 필요")
+                if st.button("💧 정제수 0% 설정 (원료 초과)", type="primary", use_container_width=True):
+                    st.session_state.slots[19]['배합비(%)'] = 0
+                    st.rerun()
+            else:
+                st.warning(f"정제수 {water_target:.3f}%로 조정 필요 (현재 합계 {total_with_water:.3f}%)")
+                if st.button(f"💧 정제수 → {water_target:.3f}% (합계 100%)", type="primary", use_container_width=True):
+                    st.session_state.slots[19]['배합비(%)'] = water_target
+                    st.rerun()
+        else:
+            st.success(f"✅ 배합비 합계 100.000%")
+
+    # AI 이화학분석 결과 테이블 (있으면 표시)
+    if st.session_state.ai_est_results:
+        st.markdown('<div class="est-box">🤖 <b>AI 이화학분석 결과</b> — 배합표에 자동 반영됨</div>', unsafe_allow_html=True)
+        st.dataframe(pd.DataFrame(st.session_state.ai_est_results), use_container_width=True, hide_index=True)
+        st.caption("※ AI 추정값은 참고용입니다. 수정이 필요하면 아래 편집 섹션에서 직접 수정하세요.")
+
+    # 직접입력 원료 상세편집
+    if custom_all:
+        with st.expander(f"✏️ 직접입력 원료 상세편집 ({len(custom_all)}종)"):
+            for ci in custom_all:
+                s = st.session_state.slots[ci]
+                st.markdown(f"**슬롯{ci+1}: {s['원료명']}** ({s['배합비(%)']:.3f}%)")
+                ec = st.columns(5)
+                with ec[0]:
+                    bx = st.number_input("Brix", 0.0, 100.0, float(s.get('당도(Bx)', 0)), 0.1, key=f"cbx{ci}")
+                    st.session_state.slots[ci]['당도(Bx)'] = bx
+                    st.session_state.slots[ci]['Brix(°)'] = bx
+                    st.session_state.slots[ci]['1%Brix기여'] = round(bx/100, 4) if bx else 0
+                with ec[1]:
+                    ac = st.number_input("산도(%)", 0.0, 50.0, float(s.get('산도(%)', 0)), 0.01, key=f"cac{ci}")
+                    st.session_state.slots[ci]['산도(%)'] = ac
+                    st.session_state.slots[ci]['1%산도기여'] = round(ac/100, 4) if ac else 0
+                with ec[2]:
+                    sw = st.number_input("감미도", 0.0, 50000.0, float(s.get('감미도', 0)), 0.1, key=f"csw{ci}")
+                    st.session_state.slots[ci]['감미도'] = sw
+                    st.session_state.slots[ci]['1%감미기여'] = round(sw/100, 4) if sw else 0
+                with ec[3]:
+                    pr = st.number_input("단가(원/kg)", 0, 500000, int(s.get('단가(원/kg)', 0)), 100, key=f"cpr{ci}")
+                    st.session_state.slots[ci]['단가(원/kg)'] = pr
+                with ec[4]:
+                    if OPENAI_KEY and st.button("🤖 재추정", key=f"cai{ci}"):
                         try:
                             est = call_gpt_estimate_ingredient(OPENAI_KEY, s['원료명'])
-                            for k_from, k_to in [
-                                ('Brix', '당도(Bx)'), ('Brix', 'Brix(°)'), ('산도_pct', '산도(%)'),
-                                ('감미도_설탕대비', '감미도'), ('감미도_설탕대비', '감미도(설탕대비)'),
-                                ('예상단가_원kg', '단가(원/kg)'), ('1pct_Brix기여', '1%Brix기여'),
-                                ('1pct_pH영향', '1%pH영향'), ('1pct_산도기여', '1%산도기여'),
-                                ('1pct_감미기여', '1%감미기여')
-                            ]:
-                                st.session_state.slots[ci][k_to] = safe_float(est.get(k_from, 0))
-                            st.session_state.slots[ci] = calc_slot_contributions(st.session_state.slots[ci])
-                            results.append({'원료명': s['원료명'], **est})
+                            st.session_state.slots[ci] = apply_estimation_to_slot(st.session_state.slots[ci], est)
+                            st.rerun()
                         except Exception as e:
-                            st.error(f"'{s['원료명']}' 실패: {e}")
-                if results:
-                    st.markdown("### 🤖 AI 이화학추정 결과")
-                    st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
-                    st.caption("※ 추정값이 배합표에 자동 반영됨. 직접 수정 가능.")
-                    st.rerun()
+                            st.error(str(e))
+                st.session_state.slots[ci] = calc_slot_contributions(st.session_state.slots[ci])
 
     # ── 결과 요약 ──
     st.markdown("---")
     result = calc_formulation(st.session_state.slots, st.session_state.volume)
-    st.markdown('<div class="sim-header">▶ 시뮬레이션 결과 요약</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sim-hdr">▶ 시뮬레이션 결과</div>', unsafe_allow_html=True)
     spec = get_spec(df_spec, st.session_state.bev_type)
     comp = check_compliance(result, spec) if spec else {}
     pct_ok = abs(result['배합비합계(%)'] - 100) < 0.01
@@ -400,38 +467,28 @@ def page_simulator():
     r1, r2 = st.columns(2)
     with r1:
         for label, val, status in [
-            ("배합비 합계(%)", f"{result['배합비합계(%)']:.3f}", "✅ 100%" if pct_ok else f"⚠️ {result['배합비합계(%)']:.3f}%"),
-            ("예상 당도(Bx)", f"{result['예상당도(Bx)']:.2f}", comp.get('당도', ('',))[0]),
-            ("예상 산도(%)", f"{result['예상산도(%)']:.4f}", comp.get('산도', ('',))[0]),
+            ("배합비 합계", f"{result['배합비합계(%)']:.3f}%", "✅ 100%" if pct_ok else f"⚠️ {result['배합비합계(%)']:.3f}%"),
+            ("예상 당도(Bx)", f"{result['예상당도(Bx)']:.2f}°", comp.get('당도', ('',))[0]),
+            ("예상 산도", f"{result['예상산도(%)']:.4f}%", comp.get('산도', ('',))[0]),
             ("예상 감미도", f"{result['예상감미도']:.4f}", ""),
-            ("원재료비(원/kg)", f"{result['원재료비(원/kg)']:,.0f}", ""),
-            ("원재료비(원/병)", f"{result['원재료비(원/병)']:,.0f}", ""),
+            ("원가(원/kg)", f"{result['원재료비(원/kg)']:,.0f}", ""),
+            ("원가(원/병)", f"{result['원재료비(원/병)']:,.0f}", ""),
         ]:
             cls = 'pass' if '✅' in str(status) else ('fail' if '⚠️' in str(status) else 'infot')
-            st.markdown(f'<div class="rrow"><b>{label}</b> &nbsp; <code>{val}</code> &nbsp; <span class="{cls}">{status}</span></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="rrow"><b>{label}</b> <code>{val}</code> <span class="{cls}">{status}</span></div>', unsafe_allow_html=True)
     with r2:
         for label, val, status in [
-            ("정제수 비율(%)", f"{result['정제수비율(%)']:.1f}", comp.get('정제수비율', ('',))[0]),
+            ("정제수", f"{result['정제수비율(%)']:.1f}%", ""),
             ("pH(참고)", f"{result['예상pH']:.2f}", comp.get('pH', ('ℹ️ 실측필요',))[0]),
             ("당산비", f"{result['당산비']}", ""),
-            ("과즙함량(%)", f"{result['과즙함량(%)']:.1f}", ""),
+            ("과즙함량", f"{result['과즙함량(%)']:.1f}%", ""),
         ]:
             cls = 'pass' if '✅' in str(status) else ('fail' if '⚠️' in str(status) else 'infot')
-            st.markdown(f'<div class="rrow"><b>{label}</b> &nbsp; <code>{val}</code> &nbsp; <span class="{cls}">{status}</span></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="rrow"><b>{label}</b> <code>{val}</code> <span class="{cls}">{status}</span></div>', unsafe_allow_html=True)
 
-    # 정제수 자동조정
-    if not pct_ok:
-        ing_tot = sum(safe_float(st.session_state.slots[j].get('배합비(%)', 0)) for j in range(19))
-        if ing_tot <= 100:
-            if st.button("💧 정제수 자동조정 (100% 맞추기)", type="primary", use_container_width=True):
-                st.session_state.slots[19]['배합비(%)'] = round(100 - ing_tot, 3)
-                st.rerun()
-        else:
-            st.warning(f"⚠️ 원료합계 {ing_tot:.3f}% > 100%. 원료 배합비를 줄여주세요.")
-
-    # ── [개선5] 하단: 저장 / 출력 / CSV ──
+    # 하단 버튼
     st.markdown("---")
-    b1, b2, b3, b4 = st.columns(4)
+    b1, b2, b3 = st.columns(3)
     with b1:
         sn = st.text_input("저장명", f"{st.session_state.product_name}_{datetime.now().strftime('%H%M')}")
         if st.button("💾 히스토리 저장", use_container_width=True):
@@ -442,46 +499,32 @@ def page_simulator():
             st.success(f"✅ 저장 ({len(st.session_state.history)}건)")
     with b2:
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("📋 배합표 출력 (공란 제외)", use_container_width=True):
-            rows = []
-            for i, s in enumerate(st.session_state.slots):
-                if safe_float(s.get('배합비(%)', 0)) > 0 and s.get('원료명'):
-                    rows.append({'No': i+1, '원료명': s['원료명'], '배합비(%)': round(s['배합비(%)'], 3),
-                                'AI용도특성': s.get('AI용도특성', ''), 'Brix': s.get('당도(Bx)', 0),
-                                '단가(원/kg)': s.get('단가(원/kg)', 0), '배합량(g/kg)': s.get('배합량(g/kg)', 0)})
-            if rows:
-                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-    with b3:
-        st.markdown("<br>", unsafe_allow_html=True)
         out_rows = [{'No': i+1, '원료명': s['원료명'], '배합비(%)': round(s['배합비(%)'], 3),
-                     '당도(Bx)': s.get('당도(Bx)', 0), '산도(%)': s.get('산도(%)', 0),
-                     '감미도': s.get('감미도', 0), '단가(원/kg)': s.get('단가(원/kg)', 0),
+                     'Brix': s.get('당도(Bx)', 0), '산도': s.get('산도(%)', 0),
+                     '감미도': s.get('감미도', 0), '단가': s.get('단가(원/kg)', 0),
                      '배합량(g/kg)': s.get('배합량(g/kg)', 0)}
                     for i, s in enumerate(st.session_state.slots)
                     if safe_float(s.get('배합비(%)', 0)) > 0 and s.get('원료명')]
         if out_rows:
             csv_data = pd.DataFrame(out_rows).to_csv(index=False).encode('utf-8-sig')
-            st.download_button("📥 CSV 다운로드", csv_data,
+            st.download_button("📥 배합표 CSV", csv_data,
                               f"배합표_{st.session_state.product_name}.csv", "text/csv", use_container_width=True)
-    with b4:
+    with b3:
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("🧑‍🔬 AI 연구원에게 →", use_container_width=True, type="primary"):
-            st.success("좌측 '🧑‍🔬 AI 연구원 평가' 선택")
+        if out_rows and st.button("📋 배합표 출력", use_container_width=True):
+            st.dataframe(pd.DataFrame(out_rows), use_container_width=True, hide_index=True)
 
 
-# ================================================================
+# ============================================================
 # PAGE 2: AI 연구원
-# ================================================================
+# ============================================================
 def page_ai_researcher():
     st.title("🧑‍🔬 AI 음료개발연구원 평가")
-    st.caption("20년 경력 수석 연구원 'Dr. 이음료' 페르소나")
-    if not OPENAI_KEY:
-        st.error("⚠️ OpenAI API 키 필요"); return
+    if not OPENAI_KEY: st.error("⚠️ OpenAI API 키 필요"); return
     result = calc_formulation(st.session_state.slots, st.session_state.volume)
     active = [(s['원료명'], s['배합비(%)']) for s in st.session_state.slots
               if safe_float(s.get('배합비(%)', 0)) > 0 and s.get('원료명')]
-    if not active:
-        st.warning("배합표가 비어있습니다."); return
+    if not active: st.warning("배합표가 비어있습니다."); return
     with st.expander("📋 현재 배합표", expanded=True):
         st.dataframe(pd.DataFrame(active, columns=['원료명', '배합비(%)']), use_container_width=True)
         st.markdown(f"**Brix {result['예상당도(Bx)']}° | pH {result['예상pH']} | 산도 {result['예상산도(%)']:.4f}%**")
@@ -499,35 +542,29 @@ def page_ai_researcher():
         if mod:
             st.dataframe(pd.DataFrame(mod), use_container_width=True)
             if st.button("✅ 수정배합 적용", type="primary"):
-                new = init_slots()
-                for i, m in enumerate(mod):
-                    if i >= 19: break
-                    new[i] = fill_slot_from_db(new[i], m['원료명'], df_ing, PH_COL)
-                    new[i]['배합비(%)'] = safe_float(m.get('배합비(%)', 0))
-                    new[i] = calc_slot_contributions(new[i])
+                new, est = load_formulation_with_estimation(
+                    [{'슬롯': i+1, '원료명': m['원료명'], '배합비': safe_float(m.get('배합비(%)',0))}
+                     for i, m in enumerate(mod) if i < 19], auto_estimate=True)
                 st.session_state.slots = new
+                st.session_state.ai_est_results = est
                 st.rerun()
 
 
-# ================================================================
-# PAGE 3~5: 이미지, 역설계, 시장분석
-# ================================================================
+# ============================================================
+# PAGE 3~5
+# ============================================================
 def page_image():
     st.title("🎨 AI 제품 이미지 생성")
-    if not OPENAI_KEY:
-        st.error("⚠️ OpenAI API 키 필요"); return
+    if not OPENAI_KEY: st.error("⚠️ OpenAI API 키 필요"); return
     prompt = build_dalle_prompt(st.session_state.product_name, st.session_state.bev_type,
                                 st.session_state.slots, st.session_state.container, st.session_state.volume)
     prompt = st.text_area("프롬프트", prompt, height=100)
     if st.button("🎨 이미지 생성", type="primary"):
         with st.spinner("생성 중..."):
-            try:
-                st.session_state.generated_image = call_dalle(OPENAI_KEY, prompt)
-            except Exception as e:
-                st.error(f"실패: {e}")
+            try: st.session_state.generated_image = call_dalle(OPENAI_KEY, prompt)
+            except Exception as e: st.error(f"실패: {e}")
     if st.session_state.generated_image:
         st.image(st.session_state.generated_image, use_container_width=True)
-
 
 def page_reverse():
     st.title("🔄 시판제품 역설계")
@@ -537,286 +574,170 @@ def page_reverse():
     sel = st.selectbox("제품", f['제품명'].dropna().tolist())
     if sel:
         prod = df_product[df_product['제품명'] == sel].iloc[0]
-        st.markdown(f"**{sel}** — {prod.get('제조사', '')} | {prod.get('세부유형', '')}")
+        st.markdown(f"**{sel}** — {prod.get('제조사','')} | {prod.get('세부유형','')}")
         if st.button("🔄 역설계 → 시뮬레이터", type="primary"):
             st.session_state.slots = reverse_engineer(prod, df_ing, PH_COL)
-            st.session_state.product_name = f"{sel}_역설계"
-            st.success("✅ 시뮬레이터에 반영됨")
-
+            st.session_state.product_name = f"{sel}_역설계"; st.success("✅")
 
 def page_market():
     st.title("📊 시장제품 분석")
     sel_cat = st.selectbox("대분류", ['전체'] + df_product['대분류'].dropna().unique().tolist())
     f = df_product if sel_cat == '전체' else df_product[df_product['대분류'] == sel_cat]
     k1, k2, k3 = st.columns(3)
-    k1.metric("제품수", len(f))
-    k2.metric("제조사", f['제조사'].nunique())
+    k1.metric("제품수", len(f)); k2.metric("제조사", f['제조사'].nunique())
     k3.metric("평균가격", f"{f['가격(원)'].dropna().mean():,.0f}원")
-    st.dataframe(f[['No', '대분류', '세부유형', '제품명', '제조사', '용량(ml)', '가격(원)']],
+    st.dataframe(f[['No','대분류','세부유형','제품명','제조사','용량(ml)','가격(원)']],
                  use_container_width=True, height=300)
 
 
-# ================================================================
-# [개선1] PAGE 6: 교육용 실습 — 단계별 배합연습 + 주의사항
-# ================================================================
+# ============================================================
+# PAGE 6: 교육용 실습
+# ============================================================
 def page_education():
-    st.markdown('<div class="sim-header">🎓 교육용 배합 실습 도구</div>', unsafe_allow_html=True)
-    st.caption("단계별로 원료를 투입하며 배합을 연습합니다. 각 단계마다 식품유형별 주의사항이 표시됩니다.")
-
-    bev_types = df_spec['음료유형'].dropna().tolist()
-    bev = st.selectbox("실습 음료유형", bev_types, key="edu_bev")
-
-    step_slot_map = {
-        '1단계_원재료': list(range(0, 4)),
-        '2단계_당류': list(range(4, 8)),
-        '3단계_산미료': [12, 13],
-        '4단계_안정제': list(range(8, 12)),
-        '5단계_기타': [14, 15, 16, 17, 18],
-    }
-
+    st.markdown('<div class="sim-hdr">🎓 교육용 배합 실습</div>', unsafe_allow_html=True)
+    bev = st.selectbox("실습 음료유형", df_spec['음료유형'].dropna().tolist(), key="edu_bev")
+    step_slot_map = {'1단계_원재료': list(range(0,4)), '2단계_당류': list(range(4,8)),
+                     '3단계_산미료': [12,13], '4단계_안정제': list(range(8,12)),
+                     '5단계_기타': [14,15,16,17,18]}
     for step_key, step_info in EDUCATION_STEPS.items():
         slot_idxs = step_slot_map.get(step_key, [])
-        st.markdown(f'<div class="edu-step">{step_info["icon"]} <b>── {step_info["title"]} ──</b> ({step_info["items"]})</div>', unsafe_allow_html=True)
-        st.markdown(f'📖 **가이드**: {step_info["guide"]}')
+        st.markdown(f'<div class="edu-step">{step_info["icon"]} <b>{step_info["title"]}</b> — {step_info["items"]}</div>', unsafe_allow_html=True)
+        st.markdown(f'📖 {step_info["guide"]}')
         st.markdown(f'<div class="edu-warn">{step_info["warning"]}</div>', unsafe_allow_html=True)
-
-        # 해당 단계의 간소화 배합표
-        for slot_idx in slot_idxs:
-            ec = st.columns([0.3, 2.5, 1.2, 1.0, 2.0])
-            ec[0].markdown(f'<span class="cel">{slot_idx+1}</span>', unsafe_allow_html=True)
-            s = st.session_state.edu_slots[slot_idx]
+        for si in slot_idxs:
+            ec = st.columns([0.3, 2.5, 1.2, 1.0])
+            ec[0].markdown(f'<span class="t-cel">{si+1}</span>', unsafe_allow_html=True)
+            s = st.session_state.edu_slots[si]
             with ec[1]:
+                opts = [''] + ING_LIST
                 cur = s.get('원료명', '')
-                def_idx = ING_NAMES.index(cur) if cur in ING_NAMES else 0
-                picked = st.selectbox("원료", ING_NAMES, index=def_idx,
-                                      label_visibility="collapsed", key=f"ei{slot_idx}")
-                if picked not in ['(선택)', '✏️ 직접입력'] and picked != cur:
-                    st.session_state.edu_slots[slot_idx] = fill_slot_from_db(EMPTY_SLOT.copy(), picked, df_ing, PH_COL)
-                    s = st.session_state.edu_slots[slot_idx]
+                ci = opts.index(cur) if cur in opts else 0
+                p = st.selectbox("원료", opts, index=ci, label_visibility="collapsed",
+                                 key=f"ei{si}", format_func=lambda x: "(선택)" if x=='' else x)
+                if p and p != cur:
+                    st.session_state.edu_slots[si] = fill_slot_from_db(EMPTY_SLOT.copy(), p, df_ing, PH_COL)
             with ec[2]:
-                pct = st.number_input("배합비(%)", 0.0, 100.0, float(s.get('배합비(%)', 0)), 0.1,
-                                      format="%.2f", label_visibility="collapsed", key=f"ep{slot_idx}")
-                st.session_state.edu_slots[slot_idx]['배합비(%)'] = pct
-            st.session_state.edu_slots[slot_idx] = calc_slot_contributions(st.session_state.edu_slots[slot_idx])
-            s = st.session_state.edu_slots[slot_idx]
-            ec[3].markdown(f'<span class="cnum">Bx기여: {s.get("당기여", 0):.2f}</span>', unsafe_allow_html=True)
-            # [개선2] 용도특성
-            ec[4].markdown(f'<span class="cel">{s.get("AI용도특성", "")}</span>', unsafe_allow_html=True)
-
+                pct = st.number_input("pct", 0.0, 100.0, float(s.get('배합비(%)',0)), 0.1,
+                                      format="%.2f", label_visibility="collapsed", key=f"ep{si}")
+                st.session_state.edu_slots[si]['배합비(%)'] = pct
+            st.session_state.edu_slots[si] = calc_slot_contributions(st.session_state.edu_slots[si])
+            ec[3].markdown(f'<span class="t-num">Bx: {st.session_state.edu_slots[si].get("당기여",0):.2f}</span>', unsafe_allow_html=True)
         st.markdown("---")
-
-    # 실습 결과
-    edu_result = calc_formulation(st.session_state.edu_slots, 500)
-    st.markdown('<div class="sim-header">📊 실습 결과</div>', unsafe_allow_html=True)
+    er = calc_formulation(st.session_state.edu_slots, 500)
     mc = st.columns(5)
-    mc[0].metric("Brix", f"{edu_result['예상당도(Bx)']:.2f}°")
-    mc[1].metric("pH(추정)", f"{edu_result['예상pH']:.2f}")
-    mc[2].metric("산도", f"{edu_result['예상산도(%)']:.4f}%")
-    mc[3].metric("정제수", f"{edu_result['정제수비율(%)']:.1f}%")
-    mc[4].metric("원가", f"{edu_result['원재료비(원/kg)']:,.0f}원/kg")
-
-    edu_spec = get_spec(df_spec, bev)
-    if edu_spec:
-        edu_comp = check_compliance(edu_result, edu_spec)
-        for k, (msg, ok) in edu_comp.items():
-            if ok is True:
-                st.success(f"{k}: {msg}")
-            elif ok is False:
-                st.error(f"{k}: {msg}")
-            else:
-                st.info(f"{k}: {msg}")
-
-    if st.button("🔄 실습 초기화"):
-        st.session_state.edu_slots = init_slots()
-        st.rerun()
+    mc[0].metric("Brix", f"{er['예상당도(Bx)']:.2f}°"); mc[1].metric("pH", f"{er['예상pH']:.2f}")
+    mc[2].metric("산도", f"{er['예상산도(%)']:.4f}%"); mc[3].metric("정제수", f"{er['정제수비율(%)']:.1f}%")
+    mc[4].metric("원가", f"{er['원재료비(원/kg)']:,.0f}원/kg")
+    es = get_spec(df_spec, bev)
+    if es:
+        for k, (msg, ok) in check_compliance(er, es).items():
+            (st.success if ok is True else st.error if ok is False else st.info)(f"{k}: {msg}")
+    if st.button("🔄 초기화"): st.session_state.edu_slots = init_slots(); st.rerun()
 
 
-# ================================================================
-# [개선5] PAGE 7: 기획서 + HACCP — 아이콘 추가
-# ================================================================
+# ============================================================
+# PAGE 7: HACCP
+# ============================================================
 def page_planner():
-    st.title("📋 신제품 기획서 + 공정시방서 + HACCP")
+    st.title("📋 기획서 + 공정시방서 + HACCP")
     result = calc_formulation(st.session_state.slots, st.session_state.volume)
     active = [(s['원료명'], s['배합비(%)']) for s in st.session_state.slots
-              if safe_float(s.get('배합비(%)', 0)) > 0 and s.get('원료명')]
-    if not active:
-        st.warning("배합표가 비어있습니다."); return
-
+              if safe_float(s.get('배합비(%)',0)) > 0 and s.get('원료명')]
+    if not active: st.warning("배합표가 비어있습니다."); return
     st.markdown(f"**{st.session_state.product_name}** | {st.session_state.bev_type} | {st.session_state.volume}ml")
     mc = st.columns(6)
-    mc[0].metric("Brix", result['예상당도(Bx)'])
-    mc[1].metric("pH", result['예상pH'])
-    mc[2].metric("산도", f"{result['예상산도(%)']:.4f}%")
-    mc[3].metric("감미도", f"{result['예상감미도']:.4f}")
-    mc[4].metric("당산비", result['당산비'])
-    mc[5].metric("원가", f"{result['원재료비(원/kg)']:,.0f}")
-
-    tabs = st.tabs(["📋 기획서", "🏭 공정시방서(SOP)", "📄 HACCP 서류 (6종)", "🤖 AI 분석보고서"])
-
-    # TAB 1: 기획서
+    mc[0].metric("Brix", result['예상당도(Bx)']); mc[1].metric("pH", result['예상pH'])
+    mc[2].metric("산도", f"{result['예상산도(%)']:.4f}%"); mc[3].metric("감미도", f"{result['예상감미도']:.4f}")
+    mc[4].metric("당산비", result['당산비']); mc[5].metric("원가", f"{result['원재료비(원/kg)']:,.0f}")
+    tabs = st.tabs(["📋 기획서", "🏭 SOP", "📄 HACCP (6종)", "🤖 AI 보고서"])
     with tabs[0]:
-        st.subheader("신제품 기획서")
         raw_b = result['원재료비(원/병)']
-        pkg = {'PET': 120, '캔': 90, '유리병': 200, '종이팩': 80, '파우치': 60}.get(st.session_state.container, 100)
-        mfg = raw_b * 0.4
-        total = raw_b + pkg + mfg
-        price = st.session_state.target_price
-        margin = price - total
-        st.dataframe(pd.DataFrame({
-            '항목': ['원재료비', '포장재비', '제조비', '총원가', '판매가', '마진'],
-            '금액(원/병)': [f'{raw_b:,.0f}', f'{pkg:,.0f}', f'{mfg:,.0f}', f'{total:,.0f}', f'{price:,.0f}', f'{margin:,.0f}'],
-        }), use_container_width=True, hide_index=True)
-
-    # TAB 2: 공정시방서 [개선5: 아이콘]
+        pkg = {'PET':120,'캔':90,'유리병':200,'종이팩':80,'파우치':60}.get(st.session_state.container,100)
+        mfg = raw_b*0.4; total = raw_b+pkg+mfg; price = st.session_state.target_price; margin = price-total
+        st.dataframe(pd.DataFrame({'항목':['원재료비','포장재비','제조비','총원가','판매가','마진'],
+            '금액(원/병)':[f'{raw_b:,.0f}',f'{pkg:,.0f}',f'{mfg:,.0f}',f'{total:,.0f}',f'{price:,.0f}',f'{margin:,.0f}']}),
+            use_container_width=True, hide_index=True)
     with tabs[1]:
-        st.subheader("🏭 공정시방서 / 작업지시서")
         matched = match_process(st.session_state.bev_type, df_process)
         if not matched.empty:
             for _, p in matched.iterrows():
-                step = str(p.get('세부공정', ''))
+                step = str(p.get('세부공정',''))
                 icon = '⚙️'
                 for kw, ic in HACCP_ICONS.items():
-                    if kw in step:
-                        icon = ic; break
-                ccp_raw = str(p.get('CCP여부', ''))
+                    if kw in step: icon = ic; break
+                ccp_raw = str(p.get('CCP여부',''))
                 ccp_tag = f" 🔴 **{ccp_raw}**" if ccp_raw.startswith('CCP') else ""
-                with st.expander(f"{icon} {p.get('공정단계', '')} — {step}{ccp_tag}"):
-                    st.markdown(f"**작업방법**: {p.get('작업방법(구체적)', '-')}")
-                    st.markdown(f"**조건**: {p.get('주요조건/파라미터', '-')}")
-                    st.markdown(f"**품질관리**: {p.get('품질관리포인트', '-')}")
+                with st.expander(f"{icon} {p.get('공정단계','')} — {step}{ccp_tag}"):
+                    st.markdown(f"**작업방법**: {p.get('작업방법(구체적)','-')}")
+                    st.markdown(f"**조건**: {p.get('주요조건/파라미터','-')}")
                     if ccp_raw.startswith('CCP'):
-                        st.error(f"🔴 **{ccp_raw}** | CL: {p.get('한계기준(CL)', '-')} | 모니터링: {p.get('모니터링방법', '-')} | 개선조치: {p.get('개선조치', '-')}")
-            sop_text = haccp_sop(st.session_state.bev_type, df_process, st.session_state.product_name, st.session_state.slots)
-            st.download_button("💾 SOP 다운로드", sop_text, f"SOP_{st.session_state.product_name}.txt")
-            if OPENAI_KEY and st.button("🤖 AI 생산관리자 공정분석", key="ai_sop"):
-                form_text = '\n'.join([f"{n}:{p:.3f}%" for n, p in active])
-                with st.spinner("🏭 AI 분석 중..."):
-                    resp = call_gpt(OPENAI_KEY, PERSONA_PRODUCTION,
-                                    f"제품:{st.session_state.product_name}\n유형:{st.session_state.bev_type}\n배합:\n{form_text}")
-                    st.markdown(resp)
-        else:
-            st.warning("매칭 공정 없음")
-
-    # TAB 3: HACCP 6종
+                        st.error(f"🔴 {ccp_raw} | CL: {p.get('한계기준(CL)','-')} | 모니터링: {p.get('모니터링방법','-')}")
+            st.download_button("💾 SOP", haccp_sop(st.session_state.bev_type, df_process,
+                st.session_state.product_name, st.session_state.slots), f"SOP.txt")
     with tabs[2]:
-        st.subheader("📄 HACCP 서류 (식약처 표준양식)")
         matched = match_process(st.session_state.bev_type, df_process)
         if not matched.empty:
-            docs = {
-                "① 위해분석표 (HA Worksheet)": haccp_ha_worksheet(st.session_state.bev_type, df_process),
-                "② CCP 결정도 (Decision Tree)": haccp_ccp_decision_tree(st.session_state.bev_type, df_process),
-                "③ CCP 관리계획서 (HACCP Plan)": haccp_ccp_plan(st.session_state.bev_type, df_process),
-                "④ CCP 모니터링 일지 (빈 양식)": haccp_monitoring_log(st.session_state.bev_type, df_process),
-                "⑤ 공정흐름도 (Flow Diagram)": haccp_flow_diagram(st.session_state.bev_type, df_process),
-                "⑥ 작업표준서 (SOP)": haccp_sop(st.session_state.bev_type, df_process,
-                                              st.session_state.product_name, st.session_state.slots),
-            }
-            for title, doc in docs.items():
-                with st.expander(title):
-                    st.code(doc, language=None)
-                    st.download_button(f"💾 다운로드", doc, f"HACCP_{title[:6]}.txt", key=f"dl_{title}")
-            all_docs = '\n\n\n'.join([f"{'=' * 70}\n{t}\n{'=' * 70}\n{d}" for t, d in docs.items()])
-            st.download_button("📦 HACCP 6종 일괄 다운로드", all_docs, "HACCP_전체.txt", type="primary")
-            if OPENAI_KEY and st.button("🤖 AI 품질전문가 HACCP 분석", key="ai_haccp"):
-                form_text = '\n'.join([f"{n}:{p:.3f}%" for n, p in active])
-                with st.spinner("📄 AI 분석 중..."):
-                    resp = call_gpt(OPENAI_KEY, PERSONA_QA,
-                                    f"제품:{st.session_state.product_name}\n유형:{st.session_state.bev_type}\n배합:\n{form_text}")
-                    st.markdown(resp)
-        else:
-            st.warning("매칭 공정 없음")
-
-    # TAB 4: AI 분석보고서
+            docs = {"① 위해분석표": haccp_ha_worksheet(st.session_state.bev_type, df_process),
+                    "② CCP결정도": haccp_ccp_decision_tree(st.session_state.bev_type, df_process),
+                    "③ CCP관리계획서": haccp_ccp_plan(st.session_state.bev_type, df_process),
+                    "④ 모니터링일지": haccp_monitoring_log(st.session_state.bev_type, df_process),
+                    "⑤ 공정흐름도": haccp_flow_diagram(st.session_state.bev_type, df_process),
+                    "⑥ SOP": haccp_sop(st.session_state.bev_type, df_process,
+                        st.session_state.product_name, st.session_state.slots)}
+            for t, d in docs.items():
+                with st.expander(t): st.code(d, language=None); st.download_button("💾", d, f"HACCP_{t[:4]}.txt", key=f"dl_{t}")
+            st.download_button("📦 6종 일괄", '\n\n'.join([f"{'='*60}\n{t}\n{'='*60}\n{d}" for t,d in docs.items()]),
+                              "HACCP_전체.txt", type="primary")
     with tabs[3]:
-        st.subheader("🤖 AI 분석보고서")
-        if not OPENAI_KEY:
-            st.error("API 키 필요"); return
-        rtype = st.selectbox("관점", ["🧑‍🔬 R&D 연구원", "🏭 생산관리자", "📄 품질전문가"])
-        persona = {"🧑‍🔬 R&D 연구원": PERSONA_PLANNER, "🏭 생산관리자": PERSONA_PRODUCTION, "📄 품질전문가": PERSONA_QA}[rtype]
-        if st.button("📝 보고서 생성", type="primary"):
-            form_text = '\n'.join([f"{n}:{p:.3f}%" for n, p in active])
-            with st.spinner("AI 작성 중..."):
-                resp = call_gpt(OPENAI_KEY, persona,
-                                f"제품:{st.session_state.product_name}\n유형:{st.session_state.bev_type}\nBrix:{result['예상당도(Bx)']} pH:{result['예상pH']}\n배합:\n{form_text}\n\n종합 분석보고서")
-                st.markdown(resp)
-                st.download_button("💾 다운로드", resp, "AI보고서.txt")
+        if not OPENAI_KEY: st.error("API 키 필요"); return
+        rtype = st.selectbox("관점", ["🧑‍🔬 R&D", "🏭 생산관리자", "📄 품질전문가"])
+        persona = {"🧑‍🔬 R&D": PERSONA_PLANNER, "🏭 생산관리자": PERSONA_PRODUCTION, "📄 품질전문가": PERSONA_QA}[rtype]
+        if st.button("📝 보고서", type="primary"):
+            ft = '\n'.join([f"{n}:{p:.3f}%" for n,p in active])
+            with st.spinner("AI..."): r = call_gpt(OPENAI_KEY, persona, f"제품:{st.session_state.product_name}\n배합:\n{ft}\n종합 분석보고서"); st.markdown(r)
 
 
-# ================================================================
-# PAGE 8~10: 표시사항, 시작레시피, 히스토리
-# ================================================================
+# ============================================================
+# PAGE 8~10
+# ============================================================
 def page_labeling():
-    st.title("📑 식품표시사항 자동생성")
-    active = [(s['원료명'], s['배합비(%)']) for s in st.session_state.slots
-              if safe_float(s.get('배합비(%)', 0)) > 0 and s.get('원료명')]
-    if not active:
-        st.warning("배합표가 비어있습니다."); return
-    label = generate_food_label(st.session_state.slots, st.session_state.product_name,
-                                st.session_state.volume, st.session_state.bev_type)
+    st.title("📑 식품표시사항")
+    active = [(s['원료명'], s['배합비(%)']) for s in st.session_state.slots if safe_float(s.get('배합비(%)',0)) > 0 and s.get('원료명')]
+    if not active: st.warning("배합표가 비어있습니다."); return
+    label = generate_food_label(st.session_state.slots, st.session_state.product_name, st.session_state.volume, st.session_state.bev_type)
     items = []
-    for k, v in label.items():
-        if isinstance(v, dict):
-            for sk, sv in v.items():
-                items.append({'표시항목': f'  {sk}', '내용': str(sv)})
-        else:
-            items.append({'표시항목': k, '내용': str(v)})
+    for k,v in label.items():
+        if isinstance(v,dict):
+            for sk,sv in v.items(): items.append({'항목':f'  {sk}','내용':str(sv)})
+        else: items.append({'항목':k,'내용':str(v)})
     st.dataframe(pd.DataFrame(items), use_container_width=True, hide_index=True)
-    with st.expander("⚠️ 알레르기 유발물질"):
-        st.markdown(f"**검출**: {label['⑧ 알레르기 유발물질']}")
-    with st.expander("📊 영양성분표"):
-        st.dataframe(pd.DataFrame([{'영양성분': k, '함량': v} for k, v in label['⑦ 영양성분'].items()]),
-                     use_container_width=True, hide_index=True)
-
 
 def page_lab_recipe():
     st.title("🧫 시작 레시피")
-    active = [(s['원료명'], s['배합비(%)']) for s in st.session_state.slots
-              if safe_float(s.get('배합비(%)', 0)) > 0 and s.get('원료명')]
-    if not active:
-        st.warning("배합표가 비어있습니다."); return
-    scales = st.multiselect("스케일", [1, 5, 10, 20, 50, 100], default=[1, 5, 20])
+    active = [(s['원료명'],s['배합비(%)']) for s in st.session_state.slots if safe_float(s.get('배합비(%)',0))>0 and s.get('원료명')]
+    if not active: st.warning("비어있음"); return
+    scales = st.multiselect("스케일", [1,5,10,20,50,100], default=[1,5,20])
     if scales:
-        recipes = generate_lab_recipe(st.session_state.slots, scales)
-        for scale, items in recipes.items():
-            st.subheader(f"📋 {scale} 칭량표")
-            st.dataframe(pd.DataFrame(items), use_container_width=True, hide_index=True)
-
+        for sc, items in generate_lab_recipe(st.session_state.slots, scales).items():
+            st.subheader(f"📋 {sc}"); st.dataframe(pd.DataFrame(items), use_container_width=True, hide_index=True)
 
 def page_history():
-    st.title("📓 배합 히스토리")
-    if not st.session_state.history:
-        st.info("시뮬레이터에서 '히스토리 저장'으로 추가하세요."); return
+    st.title("📓 히스토리")
+    if not st.session_state.history: st.info("시뮬레이터에서 저장하세요."); return
     for idx, h in enumerate(st.session_state.history):
         with st.expander(f"**{h['name']}** — {h['timestamp']}"):
             r = h.get('result', {})
             cc = st.columns(5)
-            cc[0].metric("Brix", r.get('예상당도(Bx)', '-'))
-            cc[1].metric("pH", r.get('예상pH', '-'))
-            cc[2].metric("산도", f"{r.get('예상산도(%)', 0):.4f}%")
-            cc[3].metric("당산비", r.get('당산비', '-'))
-            cc[4].metric("원가", f"{r.get('원재료비(원/kg)', 0):,.0f}")
-            bc1, bc2 = st.columns(2)
-            with bc1:
-                if st.button("📤 시뮬레이터 로드", key=f"ld{idx}"):
-                    st.session_state.slots = [s.copy() for s in h['slots']]
-                    st.success("✅ 반영")
-            with bc2:
-                if st.button("🗑️ 삭제", key=f"rm{idx}"):
-                    st.session_state.history.pop(idx)
-                    st.rerun()
+            cc[0].metric("Brix", r.get('예상당도(Bx)','-')); cc[1].metric("pH", r.get('예상pH','-'))
+            cc[2].metric("산도", f"{r.get('예상산도(%)',0):.4f}%")
+            cc[3].metric("당산비", r.get('당산비','-')); cc[4].metric("원가", f"{r.get('원재료비(원/kg)',0):,.0f}")
+            if st.button("📤 로드", key=f"ld{idx}"): st.session_state.slots = [s.copy() for s in h['slots']]; st.success("✅")
+            if st.button("🗑️", key=f"rm{idx}"): st.session_state.history.pop(idx); st.rerun()
 
 
-# ── 라우팅 ──
-{
-    "🎯 컨셉→배합설계": page_concept,
-    "🧪 배합 시뮬레이터": page_simulator,
-    "🧑‍🔬 AI 연구원 평가": page_ai_researcher,
-    "🎨 제품 이미지 생성": page_image,
-    "🔄 역설계": page_reverse,
-    "📊 시장분석": page_market,
-    "🎓 교육용 실습": page_education,
-    "📋 기획서/HACCP": page_planner,
-    "📑 식품표시사항": page_labeling,
-    "🧫 시작 레시피": page_lab_recipe,
-    "📓 배합 히스토리": page_history,
-}[page]()
+{"🎯 컨셉→배합설계": page_concept, "🧪 배합 시뮬레이터": page_simulator,
+ "🧑‍🔬 AI 연구원 평가": page_ai_researcher, "🎨 제품 이미지 생성": page_image,
+ "🔄 역설계": page_reverse, "📊 시장분석": page_market,
+ "🎓 교육용 실습": page_education, "📋 기획서/HACCP": page_planner,
+ "📑 식품표시사항": page_labeling, "🧫 시작 레시피": page_lab_recipe,
+ "📓 배합 히스토리": page_history}[page]()

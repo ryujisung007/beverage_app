@@ -34,11 +34,31 @@ def init_slots():
 
 
 def fill_slot_from_db(slot, name, df_ing, ph_col):
+    if not name or not str(name).strip():
+        return slot
+    name = str(name).strip()
+    # ① 정확 매칭
     row = df_ing[df_ing['원료명'] == name]
+    # ② 유사 매칭: 괄호 앞 부분으로 검색
     if row.empty:
+        short = re.split(r'[\(\)]', name)[0].strip()
+        if len(short) >= 2:
+            cands = df_ing[df_ing['원료명'].str.contains(short, na=False, regex=False)]
+            if not cands.empty:
+                row = cands.head(1)
+    # ③ 역방향: DB이름의 앞부분이 입력이름에 포함
+    if row.empty:
+        for _, candidate in df_ing.iterrows():
+            db_short = re.split(r'[\(\)]', str(candidate['원료명']))[0].strip()
+            if len(db_short) >= 2 and db_short in name:
+                row = df_ing[df_ing['원료명'] == candidate['원료명']]
+                break
+    if row.empty:
+        slot['원료명'] = name
+        slot['is_custom'] = True
         return slot
     r = row.iloc[0]
-    slot['원료명'] = name
+    slot['원료명'] = str(r['원료명'])
     slot['당도(Bx)'] = safe_float(r.get('Brix(°)', 0))
     slot['산도(%)'] = safe_float(r.get('산도(%)', 0))
     slot['감미도'] = safe_float(r.get('감미도(설탕대비)', 0))
@@ -518,6 +538,43 @@ JSON만 응답:
     text = re.sub(r'```json\s*', '', text)
     text = re.sub(r'```', '', text)
     return json.loads(text)
+
+
+def apply_estimation_to_slot(slot, est):
+    """AI 추정결과 dict → 슬롯에 자동반영"""
+    mapping = [
+        ('Brix', '당도(Bx)'), ('Brix', 'Brix(°)'),
+        ('산도_pct', '산도(%)'), ('감미도_설탕대비', '감미도'),
+        ('감미도_설탕대비', '감미도(설탕대비)'), ('예상단가_원kg', '단가(원/kg)'),
+        ('1pct_Brix기여', '1%Brix기여'), ('1pct_pH영향', '1%pH영향'),
+        ('1pct_산도기여', '1%산도기여'), ('1pct_감미기여', '1%감미기여'),
+    ]
+    for k_from, k_to in mapping:
+        v = safe_float(est.get(k_from, 0))
+        if v != 0:
+            slot[k_to] = v
+    slot = calc_slot_contributions(slot)
+    return slot
+
+
+def batch_estimate_slots(api_key, slots):
+    """이화학=0인 is_custom 원료를 일괄 AI추정. 결과 리스트 반환."""
+    results = []
+    for i, s in enumerate(slots[:19]):
+        if not s.get('원료명') or safe_float(s.get('배합비(%)', 0)) <= 0:
+            continue
+        if not s.get('is_custom'):
+            continue
+        # 이화학이 전부 0인 경우만
+        if safe_float(s.get('당도(Bx)', 0)) == 0 and safe_float(s.get('산도(%)', 0)) == 0 \
+           and safe_float(s.get('감미도', 0)) == 0 and safe_float(s.get('단가(원/kg)', 0)) == 0:
+            try:
+                est = call_gpt_estimate_ingredient(api_key, s['원료명'])
+                slots[i] = apply_estimation_to_slot(slots[i], est)
+                results.append({'슬롯': i+1, '원료명': s['원료명'], **est})
+            except:
+                pass
+    return slots, results
 
 
 def call_dalle(api_key, prompt):
