@@ -49,7 +49,11 @@ PH_COL = [c for c in df_ing.columns if 'pH영향' in str(c) or 'ΔpH' in str(c)]
 df_ing[PH_COL] = pd.to_numeric(df_ing[PH_COL], errors='coerce').fillna(0)
 
 # OpenAI 키
-OPENAI_KEY = st.secrets.get("OPENAI_API_KEY", "")
+# secrets 구조 자동 감지: [openai] 섹션 또는 최상위 모두 지원
+try:
+    OPENAI_KEY = st.secrets["openai"]["OPENAI_API_KEY"]
+except (KeyError, TypeError):
+    OPENAI_KEY = st.secrets.get("OPENAI_API_KEY", "")
 
 # ============================================================
 # 사이드바
