@@ -5,19 +5,27 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import json, os, re
+import json, os, re, sys
 from datetime import datetime
-from engine import (
-    SLOT_GROUPS, EMPTY_SLOT, init_slots, fill_slot_from_db, calc_slot_contributions,
-    calc_formulation_from_slots, get_spec_range, check_compliance,
-    load_guide_formulation, reverse_engineer,
-    generate_food_label, generate_lab_recipe,
-    call_gpt_researcher, call_gpt_estimate_ingredient, call_dalle, build_dalle_prompt,
-    parse_modified_formulation,
-    generate_haccp_ha_worksheet, generate_haccp_ccp_decision_tree,
-    generate_haccp_ccp_plan, generate_haccp_monitoring_log,
-    generate_flow_diagram, generate_sop,
-)
+
+# engine.py 경로 보장 (Streamlit Cloud 호환)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+try:
+    from engine import (
+        SLOT_GROUPS, EMPTY_SLOT, init_slots, fill_slot_from_db, calc_slot_contributions,
+        calc_formulation_from_slots, get_spec_range, check_compliance,
+        load_guide_formulation, reverse_engineer,
+        generate_food_label, generate_lab_recipe,
+        call_gpt_researcher, call_gpt_estimate_ingredient, call_dalle, build_dalle_prompt,
+        parse_modified_formulation,
+        generate_haccp_ha_worksheet, generate_haccp_ccp_decision_tree,
+        generate_haccp_ccp_plan, generate_haccp_monitoring_log,
+        generate_flow_diagram, generate_sop,
+    )
+except ImportError as e:
+    st.error(f"❌ engine.py 로딩 실패: {e}\n\nengine.py 파일이 app.py와 같은 폴더에 있는지 확인하세요.")
+    st.stop()
 
 st.set_page_config(page_title="🧪 음료개발 AI 플랫폼", page_icon="🧪", layout="wide")
 
