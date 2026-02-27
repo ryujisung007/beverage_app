@@ -102,9 +102,12 @@ st.markdown("""<style>
 .pass {color: #2e7d32; font-weight: bold;}
 .fail {color: #c62828; font-weight: bold;}
 .info-tag {color: #1565c0; font-weight: bold;}
-.group-label {background: #fff9c4; padding: 2px 8px; font-weight: bold; font-size: 12px; border-left: 3px solid #f9a825;}
-div[data-testid="stNumberInput"] input {font-size: 12px !important; padding: 2px 6px !important;}
-div[data-testid="stSelectbox"] > div {font-size: 12px !important;}
+.group-label {background: #fff9c4; padding: 2px 8px; font-weight: bold; font-size: 13px; border-left: 3px solid #f9a825; margin: 4px 0;}
+.slot-text {font-size: 13px !important; color: #212121 !important; font-weight: 500 !important;}
+.slot-num {font-size: 13px !important; color: #1565c0 !important; font-weight: 600 !important;}
+.slot-header {font-size: 11px !important; font-weight: bold !important; color: #37474f !important;}
+div[data-testid="stNumberInput"] input {font-size: 13px !important; padding: 4px 8px !important; color: #212121 !important;}
+div[data-testid="stSelectbox"] > div {font-size: 13px !important; color: #212121 !important;}
 </style>""", unsafe_allow_html=True)
 
 # ============================================================
@@ -195,7 +198,7 @@ Bx: {spec.get('Brix_min',0)}~{spec.get('Brix_max',0)} · pH: {spec.get('pH_min',
                '실제사례 원료명', '사례%', '당도(Bx)', '산도(%)', '감미도',
                '단가(원/kg)', '당기여', '산기여', '배합량(g/kg)']
     for i, h in enumerate(headers):
-        cols_h[i].markdown(f"<small style='font-weight:bold;font-size:10px;'>{h}</small>", unsafe_allow_html=True)
+        cols_h[i].markdown(f"<span class='slot-header'>{h}</span>", unsafe_allow_html=True)
 
     # 행 그룹별 렌더링
     slot_idx = 0
@@ -215,16 +218,16 @@ Bx: {spec.get('Brix_min',0)}~{spec.get('Brix_max',0)} · pH: {spec.get('pH_min',
                 st.session_state.slots[idx]['배합비(%)'] = water
                 st.session_state.slots[idx]['배합량(g/kg)'] = round(water * 10, 1)
                 cols = st.columns([0.4, 1, 2.5, 1, 1.5, 1, 1.5, 1, 0.8, 0.8, 0.8, 1, 1, 1, 1])
-                cols[0].markdown(f"<small>{row_num}</small>", unsafe_allow_html=True)
-                cols[1].markdown(f"<small>정제수</small>", unsafe_allow_html=True)
+                cols[0].markdown(f"<span class='slot-text'>{row_num}</span>", unsafe_allow_html=True)
+                cols[1].markdown(f"<span class='slot-text'>정제수</span>", unsafe_allow_html=True)
                 cols[2].markdown(f"**정제수**")
                 cols[3].markdown(f"**{water:.3f}**")
                 cols[14].markdown(f"**{water*10:.1f}**")
                 continue
 
             cols = st.columns([0.4, 1, 2.5, 1, 1.5, 1, 1.5, 1, 0.8, 0.8, 0.8, 1, 1, 1, 1])
-            cols[0].markdown(f"<small>{row_num}</small>", unsafe_allow_html=True)
-            cols[1].markdown(f"<small style='font-size:10px;'>{group_name[:4]}</small>", unsafe_allow_html=True)
+            cols[0].markdown(f"<span class='slot-text'>{row_num}</span>", unsafe_allow_html=True)
+            cols[1].markdown(f"<span class='slot-text'>{group_name[:4]}</span>", unsafe_allow_html=True)
 
             # 원료 선택 (드롭다운 + 직접입력)
             with cols[2]:
@@ -261,10 +264,10 @@ Bx: {spec.get('Brix_min',0)}~{spec.get('Brix_max',0)} · pH: {spec.get('pH_min',
                 st.session_state.slots[idx]['배합비(%)'] = pct
 
             # AI추천/실사례 (읽기전용)
-            cols[4].markdown(f"<small>{s.get('AI추천_원료명','')[:10]}</small>", unsafe_allow_html=True)
-            cols[5].markdown(f"<small>{s.get('AI추천_%', 0)}</small>", unsafe_allow_html=True)
-            cols[6].markdown(f"<small>{s.get('실제사례_원료명','')[:10]}</small>", unsafe_allow_html=True)
-            cols[7].markdown(f"<small>{s.get('실제사례_%', 0)}</small>", unsafe_allow_html=True)
+            cols[4].markdown(f"<span class='slot-text'>{s.get('AI추천_원료명','')[:10]}</span>", unsafe_allow_html=True)
+            cols[5].markdown(f"<span class='slot-text'>{s.get('AI추천_%', 0)}</span>", unsafe_allow_html=True)
+            cols[6].markdown(f"<span class='slot-text'>{s.get('실제사례_원료명','')[:10]}</span>", unsafe_allow_html=True)
+            cols[7].markdown(f"<span class='slot-text'>{s.get('실제사례_%', 0)}</span>", unsafe_allow_html=True)
 
             # 직접입력 원료인 경우: 이화학 규격 편집 가능
             if s.get('is_custom'):
@@ -290,18 +293,18 @@ Bx: {spec.get('Brix_min',0)}~{spec.get('Brix_max',0)} · pH: {spec.get('pH_min',
                                         label_visibility="collapsed", key=f"pr_{idx}")
                     st.session_state.slots[idx]['단가(원/kg)'] = pr
             else:
-                cols[8].markdown(f"<small>{s.get('당도(Bx)',0)}</small>", unsafe_allow_html=True)
-                cols[9].markdown(f"<small>{s.get('산도(%)',0)}</small>", unsafe_allow_html=True)
-                cols[10].markdown(f"<small>{s.get('감미도',0)}</small>", unsafe_allow_html=True)
-                cols[11].markdown(f"<small>{s.get('단가(원/kg)',0):,.0f}</small>", unsafe_allow_html=True)
+                cols[8].markdown(f"<span class='slot-text'>{s.get('당도(Bx)',0)}</span>", unsafe_allow_html=True)
+                cols[9].markdown(f"<span class='slot-text'>{s.get('산도(%)',0)}</span>", unsafe_allow_html=True)
+                cols[10].markdown(f"<span class='slot-text'>{s.get('감미도',0)}</span>", unsafe_allow_html=True)
+                cols[11].markdown(f"<span class='slot-text'>{s.get('단가(원/kg)',0):,.0f}</span>", unsafe_allow_html=True)
 
             # 기여도 계산
             st.session_state.slots[idx] = calc_slot_contributions(st.session_state.slots[idx])
             s = st.session_state.slots[idx]
 
-            cols[12].markdown(f"<small>{s.get('당기여',0):.2f}</small>", unsafe_allow_html=True)
-            cols[13].markdown(f"<small>{s.get('산기여',0):.4f}</small>", unsafe_allow_html=True)
-            cols[14].markdown(f"<small>{s.get('배합량(g/kg)',0):.1f}</small>", unsafe_allow_html=True)
+            cols[12].markdown(f"<span class='slot-text'>{s.get('당기여',0):.2f}</span>", unsafe_allow_html=True)
+            cols[13].markdown(f"<span class='slot-text'>{s.get('산기여',0):.4f}</span>", unsafe_allow_html=True)
+            cols[14].markdown(f"<span class='slot-text'>{s.get('배합량(g/kg)',0):.1f}</span>", unsafe_allow_html=True)
 
     # ── AI 원료 추정 버튼 (직접입력 원료용) ──
     custom_slots = [i for i, s in enumerate(st.session_state.slots)
@@ -309,6 +312,7 @@ Bx: {spec.get('Brix_min',0)}~{spec.get('Brix_max',0)} · pH: {spec.get('pH_min',
     if custom_slots and OPENAI_KEY:
         st.markdown("---")
         if st.button("🤖 직접입력 원료 → AI 이화학규격 추정", key="sim_ai_estimate"):
+            estimation_results = []
             for idx in custom_slots:
                 s = st.session_state.slots[idx]
                 with st.spinner(f"'{s['원료명']}' AI 추정 중..."):
@@ -325,14 +329,40 @@ Bx: {spec.get('Brix_min',0)}~{spec.get('Brix_max',0)} · pH: {spec.get('pH_min',
                         st.session_state.slots[idx]['1%산도기여'] = est.get('1pct_산도기여', 0)
                         st.session_state.slots[idx]['1%감미기여'] = est.get('1pct_감미기여', 0)
                         st.session_state.slots[idx] = calc_slot_contributions(st.session_state.slots[idx])
-                        st.success(f"✅ '{s['원료명']}' 추정 완료: Brix {est.get('Brix',0)}, pH영향 {est.get('1pct_pH영향',0)}")
+                        estimation_results.append({
+                            '원료명': s['원료명'],
+                            'Brix(°)': est.get('Brix', 0),
+                            'pH': est.get('pH', 0),
+                            '산도(%)': est.get('산도_pct', 0),
+                            '감미도': est.get('감미도_설탕대비', 0),
+                            '단가(원/kg)': est.get('예상단가_원kg', 0),
+                            '1%Brix기여': est.get('1pct_Brix기여', 0),
+                            '1%pH영향': est.get('1pct_pH영향', 0),
+                            '1%산도기여': est.get('1pct_산도기여', 0),
+                            '1%감미기여': est.get('1pct_감미기여', 0),
+                        })
                     except Exception as e:
-                        st.error(f"추정 실패: {e}")
-            st.rerun()
+                        st.error(f"'{s['원료명']}' 추정 실패: {e}")
+
+            if estimation_results:
+                st.markdown("#### 🤖 AI 추정 결과")
+                est_df = pd.DataFrame(estimation_results)
+                st.dataframe(est_df, use_container_width=True)
+                st.caption("※ AI 추정값입니다. 배합표에 자동 반영되었으며, 직접 수정도 가능합니다.")
+                st.rerun()
 
     # ── 합계 행 ──
     st.markdown("---")
+
+    # 정제수 비율 직접 계산 (calc 함수와 별도로, 렌더링 시점의 정확한 값)
+    _total_ing_pct = sum(st.session_state.slots[j].get('배합비(%)', 0) for j in range(19))
+    _water_pct = round(max(0, 100 - _total_ing_pct), 2)
+
     result = calc_formulation_from_slots(st.session_state.slots)
+    # 정제수비율 강제 동기화
+    result['정제수비율(%)'] = _water_pct
+    # 원재료비(원/병) = 원/kg × 용량(L)
+    result['원재료비(원/병)'] = round(result['원재료비(원/kg)'] * st.session_state.volume / 1000, 1)
 
     tc = st.columns([0.4, 1, 2.5, 1, 1.5, 1, 1.5, 1, 0.8, 0.8, 0.8, 1, 1, 1, 1])
     tc[0].markdown("**합계**")
@@ -353,8 +383,13 @@ Bx: {spec.get('Brix_min',0)}~{spec.get('Brix_max',0)} · pH: {spec.get('pH_min',
 
     r1, r2 = st.columns(2)
     with r1:
+        # 배합비 합계 체크 + 정제수 자동조정
+        pct_status = "✅ 100% 충족"
+        if abs(result['배합비합계(%)']-100) >= 0.01:
+            pct_status = f"⚠️ 합계 {result['배합비합계(%)']:.3f}% (100%가 아님)"
+
         items = [
-            ("배합비 합계(%)", f"{result['배합비합계(%)']:.3f}", "✅ 100% 충족" if abs(result['배합비합계(%)']-100) < 0.01 else "⚠️ 100%가 아님"),
+            ("배합비 합계(%)", f"{result['배합비합계(%)']:.3f}", pct_status),
             ("예상 당도(Bx)", f"{result['예상당도(Bx)']:.2f}", compliance.get('당도', ('', True))[0]),
             ("예상 산도(%)", f"{result['예상산도(%)']:.3f}", compliance.get('산도', ('', True))[0]),
             ("예상 감미도", f"{result['예상감미도']:.3f}", ""),
@@ -376,6 +411,19 @@ Bx: {spec.get('Brix_min',0)}~{spec.get('Brix_max',0)} · pH: {spec.get('pH_min',
         for label, val, status in items2:
             cls = 'pass' if '✅' in status else ('fail' if '⚠️' in status else 'info-tag')
             st.markdown(f"**{label}** &nbsp;&nbsp; `{val}` &nbsp;&nbsp; <span class='{cls}'>{status}</span>", unsafe_allow_html=True)
+
+    # ── 정제수 자동조정 ──
+    if abs(result['배합비합계(%)']-100) >= 0.01:
+        if st.button("💧 정제수 자동조정 (100% 맞추기)", use_container_width=True, key="sim_water_adj"):
+            # 원료합계(정제수 제외) 기준으로 정제수 재계산
+            ing_total = sum(st.session_state.slots[j].get('배합비(%)', 0) for j in range(19))
+            if ing_total <= 100:
+                st.session_state.slots[19]['배합비(%)'] = round(100 - ing_total, 3)
+                st.session_state.slots[19]['배합량(g/kg)'] = round((100 - ing_total) * 10, 1)
+                st.success(f"✅ 정제수 {100 - ing_total:.3f}%로 조정, 합계 100%")
+                st.rerun()
+            else:
+                st.warning(f"⚠️ 원료합계가 {ing_total:.3f}%로 100%를 초과합니다. 원료 배합비를 줄여주세요.")
 
     # ── 하단 버튼들 ──
     st.markdown("---")

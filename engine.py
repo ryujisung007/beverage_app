@@ -132,11 +132,11 @@ def check_compliance(result, spec):
         return {}
     checks = {}
     bx = result['예상당도(Bx)']
-    checks['당도'] = ('✅ 규격이내', True) if spec.get('Brix_min', 0) <= bx <= spec.get('Brix_max', 99) else (f'⚠️ 상한초과({spec["Brix_min"]}~{spec["Brix_max"]}°)', False)
+    checks['당도'] = ('✅ 규격이내', True) if spec.get('Brix_min', 0) <= bx <= spec.get('Brix_max', 99) else (f'⚠️ 규격이탈({bx:.2f}° → 기준 {spec["Brix_min"]}~{spec["Brix_max"]}°)', False)
 
     ac = result['예상산도(%)']
     if spec.get('산도_min', 0) > 0 or spec.get('산도_max', 0) > 0:
-        checks['산도'] = ('✅ 규격이내', True) if spec.get('산도_min', 0) <= ac <= spec.get('산도_max', 99) else (f'⚠️ 규격이탈({spec["산도_min"]}~{spec["산도_max"]}%)', False)
+        checks['산도'] = ('✅ 규격이내', True) if spec.get('산도_min', 0) <= ac <= spec.get('산도_max', 99) else (f'⚠️ 규격이탈({ac:.4f}% → 기준 {spec["산도_min"]}~{spec["산도_max"]}%)', False)
 
     cost = result['원재료비(원/kg)']
     checks['원재료비'] = ('✅ 목표이내', True)  # 사용자가 목표 설정
@@ -315,14 +315,36 @@ def call_gpt_estimate_ingredient(api_key, ingredient_name, category=""):
     resp = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": "당신은 식품원료 전문가입니다. 원료의 이화학적 특성을 추정하세요. 반드시 JSON만 응답."},
+            {"role": "system", "content": """당신은 식품원료 이화학 데이터 전문가입니다. 원료의 특성을 추정하세요.
+
+중요 참고 기준:
+- 농축과즙: Brix 40~70°, pH 2.5~4.5, 산도 1~8%, 단가 3000~15000원/kg
+  예) 오렌지농축과즙(65Brix): Brix=65, 1pct_Brix기여=0.65
+- 과일퓨레: Brix 8~15°, pH 3.0~4.5, 단가 2000~8000원/kg
+  예) 딸기퓨레(12Brix): Brix=12, 1pct_Brix기여=0.12
+- 당류: Brix 65~100°, 감미도(설탕대비) 0.6~1.8
+  예) 설탕: Brix=100, 감미도=1.0, 1pct_Brix기여=1.0, 1pct_감미기여=0.01
+  예) 액상과당(HFCS55): Brix=77, 감미도=1.1, 1pct_Brix기여=0.77
+  예) 물엿: Brix=75, 감미도=0.4, 1pct_Brix기여=0.75
+- 고감미 감미료: Brix=0, 감미도 100~600
+  예) 수크랄로스: 감미도=600, 1pct_감미기여=6.0
+- 산미료: pH영향 강함
+  예) 구연산: 1pct_pH영향=-0.40, 1pct_산도기여=0.0064
+
+1pct_Brix기여 = Brix / 100 (원료 1%를 음료에 넣었을때 Brix 기여)
+1pct_감미기여 = 감미도_설탕대비 / 100
+1pct_산도기여 = 산도_pct / 100
+1pct_pH영향 = 산성원료는 음수(-0.01~-1.5), 알칼리는 양수, 중성은 0
+
+값이 0이면 안되는 원료: 농축액, 퓨레, 당류, 시럽류의 Brix와 감미도는 반드시 0보다 커야 함.
+반드시 JSON만 응답. 설명 없이."""},
             {"role": "user", "content": f"""원료명: {ingredient_name}
 분류: {category}
 
-아래 JSON 형식으로만 응답 (설명 없이):
+JSON 형식으로만 응답:
 {{"Brix": 0, "pH": 0, "산도_pct": 0, "감미도_설탕대비": 0, "예상단가_원kg": 0, "1pct_Brix기여": 0, "1pct_pH영향": 0, "1pct_산도기여": 0, "1pct_감미기여": 0}}"""}
         ],
-        temperature=0.3, max_tokens=200,
+        temperature=0.3, max_tokens=300,
     )
     text = resp.choices[0].message.content.strip()
     text = re.sub(r'```json\s*', '', text)
