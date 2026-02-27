@@ -20,7 +20,7 @@ SLOT_GROUPS = [
 EMPTY_SLOT = {
     '원료명': '', '배합비(%)': 0.0,
     'AI추천_원료명': '', 'AI추천_%': 0.0,
-    '기존표준_원료명': '', '기존표준_%': 0.0,
+    'AI용도특성': '',
     '당도(Bx)': 0, '산도(%)': 0, '감미도': 0, '기능1': '', '기능2': '',
     '단가(원/kg)': 0, 'pH': 0, 'Brix(°)': 0, '감미도(설탕대비)': 0,
     '1%Brix기여': 0, '1%pH영향': 0, '1%산도기여': 0, '1%감미기여': 0,
@@ -152,7 +152,7 @@ def check_compliance(result, spec):
 
 
 # ============================================================
-# 3. 가이드배합비 로딩 (기존표준배합비)
+# 3. 가이드배합비 로딩
 # ============================================================
 def load_guide(df_guide, bev_type, flavor, df_ing, ph_col):
     bt = bev_type.split('(')[0]  # 과·채음료 유지
@@ -167,12 +167,6 @@ def load_guide(df_guide, bev_type, flavor, df_ing, ph_col):
             continue
         ai_name = r.get('AI추천_원료명')
         ai_pct = r.get('AI추천_배합비(%)')
-        case_name = r.get('실제사례_원료명')
-        case_pct = r.get('실제사례_배합비(%)')
-        # 기존표준배합비로 표시
-        if pd.notna(case_name) and str(case_name).strip():
-            slots[idx]['기존표준_원료명'] = str(case_name)
-            slots[idx]['기존표준_%'] = safe_float(case_pct)
         if pd.notna(ai_name) and str(ai_name).strip():
             slots[idx] = fill_slot_from_db(slots[idx], str(ai_name), df_ing, ph_col)
             if pd.notna(ai_pct) and safe_float(ai_pct) > 0:
@@ -361,6 +355,104 @@ PERSONA_FORMULATOR = """당신은 음료 배합설계 전문 연구원입니다.
 {"배합": [{"슬롯": 1, "원료명": "xxx", "배합비": 0.0, "구분": "원재료"}, ...]}
 """
 
+# [개선6] 마케팅 컨셉 → R&D 배합설계 변환 페르소나
+PERSONA_MARKETING_RD = """당신은 대형 음료회사 R&D센터 15년차 음료연구원입니다.
+마케팅팀으로부터 신제품 컨셉을 전달받아 실현 가능한 배합표로 변환하는 전문가입니다.
+
+마케팅 컨셉을 받으면 반드시:
+1️⃣ 컨셉분석: 타겟, 포지셔닝, 핵심 가치를 파악
+2️⃣ 식품유형 결정: 어떤 음료 카테고리가 적합한지
+3️⃣ 맛/향 설계: 주요 플레이버 방향
+4️⃣ 배합표 설계: 구체적 원료명과 배합비(%)
+
+배합표는 반드시 아래 JSON으로 포함:
+```json
+{"음료유형": "과·채음료", "맛": "사과", "컨셉요약": "...",
+ "주요원료설명": [{"원료명": "xxx", "사용이유": "..."}],
+ "배합": [{"슬롯": 1, "원료명": "xxx", "배합비": 0.0, "구분": "원재료", "용도특성": "..."}]}
+```
+한국어. 원재료(1-4), 당류(5-8), 안정제(9-12), 기타(13-19) 순서. 정제수 제외."""
+
+
+def call_gpt_ingredient_info(api_key, ingredient_name):
+    """[개선2] AI가 원료의 용도/특성을 한줄로 설명"""
+    from openai import OpenAI
+    client = OpenAI(api_key=api_key)
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini", temperature=0.3, max_tokens=60,
+        messages=[
+            {"role": "system", "content": "식품원료 전문가. 원료의 음료에서의 사용용도와 특성을 15자 이내 한줄로만 답변."},
+            {"role": "user", "content": f"원료: {ingredient_name}"}
+        ],
+    )
+    return resp.choices[0].message.content.strip()[:20]
+
+
+def call_gpt_marketing_to_rd(api_key, concept_text, ing_sample=""):
+    """[개선6] 마케팅 컨셉 → R&D 배합표 변환"""
+    content = f"""마케팅팀 컨셉:\n{concept_text}\n\n사용가능 원료DB: {ing_sample[:500]}"""
+    text = call_gpt(api_key, PERSONA_MARKETING_RD, content, model="gpt-4o", temp=0.6)
+    # JSON 추출
+    result = {'text': text, 'formulation': []}
+    try:
+        m = re.search(r'```json\s*(\{.*?\})\s*```', text, re.DOTALL)
+        if m:
+            parsed = json.loads(m.group(1))
+            result['formulation'] = parsed.get('배합', [])
+            result['bev_type'] = parsed.get('음료유형', '')
+            result['flavor'] = parsed.get('맛', '')
+            result['summary'] = parsed.get('컨셉요약', '')
+            result['ingredients_info'] = parsed.get('주요원료설명', [])
+    except:
+        pass
+    return result
+
+
+# 교육용 단계별 주의사항
+EDUCATION_STEPS = {
+    '1단계_원재료': {
+        'icon': '🍎', 'title': '원재료 투입',
+        'items': '과즙, 농축액, 퓨레 등',
+        'guide': '과즙함량 규격 충족 확인. 농축과즙은 환원배율(Brix÷11.5) 고려. 원산지 표시 필수.',
+        'warning': '⚠️ 냉장원료는 투입 전 품온 확인(≤10℃). 이물질 육안검사 필수.',
+    },
+    '2단계_당류': {
+        'icon': '🍯', 'title': '당류/감미료 투입',
+        'items': '설탕, 액상과당, 올리고당, 고감미료 등',
+        'guide': '목표 Brix에 맞춰 설탕 1%≈Brix 1° 기준. HFCS는 0.77°/%. 고감미료는 ppm 단위 주의.',
+        'warning': '⚠️ 설탕은 완전용해 확인(교반 60℃↑). 고감미료는 과량투입 시 이미(off-taste).',
+    },
+    '3단계_산미료': {
+        'icon': '🍋', 'title': '산미료/pH 조절',
+        'items': '구연산, 사과산, 비타민C 등',
+        'guide': '구연산 0.1%→pH약 0.1↓. 산도와 pH는 다른 개념. 당산비(Brix/산도) 목표 확인.',
+        'warning': '⚠️ 산미료 과량→치아 침식 우려. pH 3.0 미만 회피 권장.',
+    },
+    '4단계_안정제': {
+        'icon': '🧪', 'title': '안정제/호료 투입',
+        'items': '펙틴, CMC, 잔탄검, 구아검 등',
+        'guide': '과즙음료는 HM펙틴 0.1~0.3%. 유화제는 오일분산 목적. 투입 순서 중요.',
+        'warning': '⚠️ 안정제는 분산투입(더스팅 방지). 미리 설탕과 건식혼합 후 투입.',
+    },
+    '5단계_기타': {
+        'icon': '🌿', 'title': '향료/색소/비타민 투입',
+        'items': '향료, 색소, 비타민, 보존료 등',
+        'guide': '향료는 살균 전 투입(열안정형) 또는 무균충전 시 투입. 비타민C는 산화방지+영양강화 겸용.',
+        'warning': '⚠️ 천연향은 열에 약함. 보존료는 식품공전 기준 초과 금지.',
+    },
+}
+
+# HACCP 공정별 아이콘 매핑
+HACCP_ICONS = {
+    '입고': '📦', '검수': '🔍', '저장': '🏪', '보관': '🏪',
+    '칭량': '⚖️', '배합': '🔬', '혼합': '🌀', '교반': '🌀',
+    '용해': '💧', '여과': '🔲', '탈기': '💨', '균질': '🔧',
+    '살균': '🔥', 'UHT': '🔥', '냉각': '❄️',
+    '충전': '🏭', '밀봉': '🔒', '검사': '🔎', '금속': '🧲',
+    '포장': '📦', '출하': '🚛', '라벨': '🏷️',
+    '발효': '🦠', '숙성': '⏳', '탄산': '🫧', '카보': '🫧',
+}
+
 
 def call_gpt(api_key, system_prompt, user_content, model="gpt-4o", temp=0.7, max_tok=3000):
     from openai import OpenAI
@@ -413,8 +505,6 @@ def call_gpt_estimate_ingredient(api_key, ingredient_name, category=""):
 JSON만 응답:
 {{"Brix": 0, "pH": 0, "산도_pct": 0, "감미도_설탕대비": 0, "예상단가_원kg": 0, "1pct_Brix기여": 0, "1pct_pH영향": 0, "1pct_산도기여": 0, "1pct_감미기여": 0}}"""
 
-    text = call_gpt("", "", "", model="gpt-4o-mini")  # placeholder
-    # 실제 호출
     from openai import OpenAI
     client = OpenAI(api_key=api_key)
     resp = client.chat.completions.create(
@@ -466,7 +556,23 @@ def parse_modified_formulation(text):
 # ============================================================
 # 8. HACCP 서류 6종 (식약처 표준양식)
 # ============================================================
-# 공정DB 매칭 맵 (규격DB 유형 → 공정DB 유형)
+# 공정단계별 아이콘
+_STEP_ICONS = {
+    '원료입고': '📦', '입고': '📦', '원료검수': '🔍', '검수': '🔍',
+    '칭량': '⚖️', '계량': '⚖️', '용해': '🔥', '혼합': '🔄', '배합': '🔄', '교반': '🔄',
+    '균질': '🌀', '탈기': '💨', '살균': '🔥', 'UHT': '🔥', '열처리': '🔥',
+    '냉각': '❄️', '충전': '🏭', '밀봉': '🔒', '포장': '📦', '라벨링': '🏷️',
+    '검사': '✅', '검출': '🔎', '금속': '🔎', '완제품': '✅',
+    '보관': '🏪', '출하': '🚛', '발효': '🧫', '숙성': '⏰',
+    '탄산': '🫧', '카보네이션': '🫧', '시럽': '🍯',
+}
+
+
+def get_step_icon(step_name):
+    for keyword, icon in _STEP_ICONS.items():
+        if keyword in str(step_name):
+            return icon
+    return '⚙️'
 _PROCESS_MAP = {
     '과·채음료': '과·채주스', '과·채주스(100%)': '과·채주스', '과·채주스': '과·채주스',
     '탄산수': '탄산음료', '탄산음료': '탄산음료',
@@ -605,6 +711,7 @@ def haccp_flow_diagram(bev_type, df_proc):
     prev = False
     for _, p in m.iterrows():
         step = p.get('세부공정', '')
+        icon = get_step_icon(step)
         ccp_raw = str(p.get('CCP여부', ''))
         ccp = f" ★{ccp_raw}" if ccp_raw.startswith('CCP') else ""
         cond = str(p.get('주요조건/파라미터', ''))[:35]
@@ -612,8 +719,8 @@ def haccp_flow_diagram(bev_type, df_proc):
             lines.extend(["        │", "        ▼"])
         lines.extend([
             "  ┌────────────────────────────────┐",
-            f"  │ {step}{ccp:<29}│",
-            f"  │ {cond:<32}│",
+            f"  │ {icon} {step}{ccp:<25}│",
+            f"  │    {cond:<29}│",
             "  └────────────────────────────────┘"])
         prev = True
     return '\n'.join(lines)
@@ -640,9 +747,10 @@ def haccp_sop(bev_type, df_proc, product_name="", slots=None):
     for _, p in m.iterrows():
         ccp_raw = str(p.get('CCP여부', ''))
         ccp = f" [{ccp_raw}]" if ccp_raw.startswith('CCP') else ""
+        icon = get_step_icon(str(p.get('세부공정', '')))
         lines.extend([
             f"\n{'─'*70}",
-            f"■ {p.get('공정단계', '')} — {p.get('세부공정', '')}{ccp}",
+            f"■ {icon} {p.get('공정단계', '')} — {p.get('세부공정', '')}{ccp}",
             f"{'─'*70}",
             f"  【작업방법】 {p.get('작업방법(구체적)', '-')}",
             f"  【조건/파라미터】 {p.get('주요조건/파라미터', '-')}",
