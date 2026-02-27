@@ -1,714 +1,674 @@
 import streamlit as st
 import pandas as pd
-import json, os, re, math, io, base64
-from datetime import datetime
+import json, os
 
-st.set_page_config(page_title="🥤 음료개발 DB v3", layout="wide", initial_sidebar_state="expanded")
-
-# 빈공간 줄이기 CSS
-st.markdown("""<style>
-.block-container{padding-top:1.5rem;padding-bottom:0.5rem;}
-[data-testid="stSidebar"] .block-container{padding-top:1rem;}
-div[data-testid="stMetricValue"]{font-size:1.1rem;}
-.stSelectbox>div>div{min-height:32px;}
-</style>""", unsafe_allow_html=True)
-
-# ============================================================
-# SESSION STATE
-# ============================================================
-for k, v in {'product_name':'사과과채음료_시제1호','volume':1000,'bev_type_idx':1,
-    'flavor_idx':0,'custom_flavor':'','target_brix':11.0,'target_acid':0.35,
-    'target_sweet':'0.56','target_cost':1500,'ingredients':[],'total_cost':0,
-    'ai_recommendation':{},'ai_meta':{},'pack_vals':[45,8,12,50,0,5],
-    'mfg_vals':[20,18,22],'selling_price':1500,'est_ph':3.5}.items():
-    if k not in st.session_state: st.session_state[k] = v
+st.set_page_config(page_title="🥤 음료개발 데이터베이스 v3", layout="wide", initial_sidebar_state="expanded")
 
 # ============================================================
 # DATA LOADING
 # ============================================================
 @st.cache_data
 def load_data():
-    jp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "beverage_data.json")
-    if not os.path.exists(jp): st.error("❌ beverage_data.json 필요"); st.stop()
-    with open(jp,'r',encoding='utf-8') as f: raw=json.load(f)
-    s={}
-    df=pd.DataFrame(raw['raw_materials'])
-    df.rename(columns={'cat':'원료대분류','subcat':'원료소분류','name':'원료명',
-        'brix':'Brix(°)','ph':'pH','acidity':'산도(%)','sweetness':'감미도(설탕대비)',
-        'component':'주요성분','form':'공급형태','storage':'보관조건','price':'예상단가(원/kg)',
-        'brix_1pct':'1%당Brix기여','ph_1pct':'1%당pH(1%용액)',
-        'acid_1pct':'1%당산도기여','sweet_1pct':'1%당감미도기여','note':'비고'},inplace=True)
-    s['원료DB']=df
-    ds=pd.DataFrame(raw['standards'])
-    ds.rename(columns={'type':'음료유형','brix_text':'당도(Brix,°)','ph_text':'pH 범위',
-        'acid_text':'산도(%)','juice_text':'과즙함량(%)','solid_text':'고형분(%)',
-        'co2_text':'탄산가스(vol)','note':'비고','brix_min':'Brix_min','brix_max':'Brix_max',
-        'ph_min':'pH_min','ph_max':'pH_max','acid_min':'산도_min','acid_max':'산도_max'},inplace=True)
-    s['음료규격기준']=ds
-    rows=[]
-    for ck,items in raw['guides'].items():
-        for it in items:
-            rows.append({'key':f"{ck}_{it['slot']:02d}",'combo':ck,'slot':it['slot'],
-                'cat':it.get('cat',''),'AI원료명':it.get('ai_name',''),'AI배합비(%)':it.get('ai_pct',0),
-                '사례원료명':it.get('case_name',''),'사례배합비(%)':it.get('case_pct',0)})
-    s['가이드배합비']=pd.DataFrame(rows)
-    return s
+    xlsx = "음료개발_데이터베이스_v3.xlsx"
+    if not os.path.exists(xlsx):
+        st.error(f"❌ '{xlsx}' 파일을 앱과 같은 폴더에 넣어주세요.")
+        st.stop()
+    
+    sheets = {}
+    xls = pd.ExcelFile(xlsx)
+    
+    sheets['음료유형분류'] = pd.read_excel(xls, '음료유형분류')
+    sheets['시장제품DB'] = pd.read_excel(xls, '시장제품DB')
+    sheets['원료DB'] = pd.read_excel(xls, '원료DB')
+    sheets['음료규격기준'] = pd.read_excel(xls, '음료규격기준')
+    sheets['HACCP'] = pd.read_excel(xls, '표준제조공정_HACCP')
+    sheets['자재SPEC'] = pd.read_excel(xls, '자재SPEC참조', header=None)
+    sheets['과일Brix'] = pd.read_excel(xls, '과일Brix참조', header=None)
+    sheets['가이드배합비'] = pd.read_excel(xls, '가이드배합비DB')
+    
+    return sheets
 
 data = load_data()
 
 # ============================================================
-# SIDEBAR: API + 메뉴 + 표준배합비
+# SIDEBAR NAVIGATION
 # ============================================================
+st.sidebar.image("https://img.icons8.com/fluency/96/cocktail.png", width=60)
 st.sidebar.title("🥤 음료개발 DB v3")
 st.sidebar.markdown("---")
 
-# API Keys
-with st.sidebar.expander("🔑 API Keys", expanded=False):
-    gemini_key = st.text_input("Gemini API Key", type="password", placeholder="AIza...", key="gem_k")
-    openai_key = st.text_input("OpenAI API Key", type="password", placeholder="sk-...", key="oai_k")
-    if gemini_key: st.caption("✅ Gemini 입력됨")
-    if openai_key: st.caption("✅ OpenAI 입력됨")
-
-st.sidebar.markdown("---")
-page = st.sidebar.radio("📂 메뉴", [
-    "🏠 대시보드","🧪 배합시뮬레이터","💰 원가계산서",
-    "🧬 원료DB","📏 음료규격기준","📖 가이드배합비DB"])
-
-# 표준배합비 자동채움 (사이드바 하단)
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 📋 표준배합비")
-df_guide = data['가이드배합비']
-combo_list = sorted(df_guide['combo'].dropna().unique().tolist())
-sel_combo = st.sidebar.selectbox("유형+맛 조합", ["미선택"]+combo_list, key="sb_combo")
-if sel_combo != "미선택":
-    sd = df_guide[df_guide['combo']==sel_combo]
-    # 간략 표시
-    case_items = [(str(r['사례원료명']),r['사례배합비(%)']) for _,r in sd.iterrows()
-                  if str(r.get('사례원료명','')) not in ('0','nan','','None') and float(r.get('사례배합비(%)',0) or 0)>0]
-    ai_items = [(str(r['AI원료명']),r['AI배합비(%)']) for _,r in sd.iterrows()
-                if str(r.get('AI원료명','')) not in ('0','nan','','None') and float(r.get('AI배합비(%)',0) or 0)>0]
-    st.sidebar.caption(f"🟢 사례 {len(case_items)}종 | 🟣 AI {len(ai_items)}종")
-    raw_names_set = set(data['원료DB']['원료명'].tolist())
-
-    sc1,sc2 = st.sidebar.columns(2)
-    if sc1.button("🟢사례채움", use_container_width=True):
-        for _,r in sd.iterrows():
-            s=int(r['slot']); n=str(r['사례원료명']) if pd.notna(r['사례원료명']) else ''; p=float(r.get('사례배합비(%)',0) or 0)
-            if n and n!='0' and p>0 and n in raw_names_set:
-                st.session_state[f"raw_{s}"]=n; st.session_state[f"pct_{s}"]=p
-        st.rerun()
-    if sc2.button("🟣AI채움", use_container_width=True):
-        for _,r in sd.iterrows():
-            s=int(r['slot']); n=str(r['AI원료명']) if pd.notna(r['AI원료명']) else ''; p=float(r.get('AI배합비(%)',0) or 0)
-            if n and n!='0' and p>0 and n in raw_names_set:
-                st.session_state[f"raw_{s}"]=n; st.session_state[f"pct_{s}"]=p
-        st.rerun()
-
-st.sidebar.markdown("---")
-st.sidebar.caption("© FoodWell R&D Training\nGemini AI + OpenAI DALL-E")
+page = st.sidebar.radio("📂 메뉴 선택", [
+    "🏠 대시보드",
+    "🧪 배합시뮬레이터",
+    "💰 원가계산서",
+    "📋 음료유형분류",
+    "🏪 시장제품DB",
+    "🧬 원료DB",
+    "📏 음료규격기준",
+    "🏭 표준제조공정/HACCP",
+    "📊 자재SPEC참조",
+    "🍎 과일Brix참조",
+    "📖 가이드배합비DB",
+])
 
 # ============================================================
-# HELPERS
+# HELPER FUNCTIONS
 # ============================================================
-def sf(val, default=0.0):
-    if val is None: return default
-    if isinstance(val,(int,float)): return float(val) if pd.notna(val) else default
-    s=str(val).strip().replace(',','')
-    if not s or s in ('—','-','nan','None',''): return default
-    try: return float(s)
-    except: return default
-
-def get_raw(n,df):
-    m=df[df['원료명']==n]; return m.iloc[0] if len(m)>0 else None
-def get_std(bt,df):
-    m=df[df['음료유형']==bt]; return m.iloc[0] if len(m)>0 else None
-def matv(mat,col):
-    if mat is None: return 0.0
-    try: return sf(mat.get(col))
-    except: return 0.0
-
-def estimate_ph(ingredients, df_raw):
-    tH=0.0; tOH=0.0
-    for ing in ingredients:
-        pct=ing['배합비(%)']/100
-        if pct<=0: continue
-        mat=get_raw(ing['원료명'],df_raw)
-        pv=7.0
-        if mat is not None:
-            pv=sf(mat.get('1%당pH(1%용액)'))
-            if pv<=0: pv=sf(mat.get('pH'))
-            if pv<=0: pv=7.0
-        elif ing.get('_ph'):
-            pv=ing['_ph']
-        if pv<7: tH+=pct*(10**(-pv))
-        elif pv>7: tOH+=pct*(10**(pv-14))
-        else: tH+=pct*1e-7
-    net=tH-tOH
-    if net>1e-14: return round(-math.log10(net),2)
-    elif net<-1e-14: return round(14+math.log10(-net),2)
-    return 7.0
-
-# ============================================================
-# 원료명 유추 엔진 (개선)
-# ============================================================
-def infer_from_name(name):
-    """DB에 없는 원료의 Brix/pH/산도/감미도를 이름에서 유추"""
-    r = {}
-    if not name: return None
-    # Brix 파싱
-    m = re.search(r'(\d+)\s*[Bb]rix', name)
-    if m: r['brix'] = float(m.group(1))
-    m2 = re.search(r'(\d+)배농축', name)
-    if m2 and 'brix' not in r: r['brix'] = float(m2.group(1)) * 11.5
-    # 과즙류 → 기본 brix 추정
-    fruit_brix = {'사과':12,'딸기':8,'포도':16,'오렌지':11,'복숭아':10,'망고':15,'레몬':8,'자몽':10,'블루베리':10,'유자':8,'감귤':10,'키위':14,'배':12,'체리':16}
-    for fr,bx in fruit_brix.items():
-        if fr in name and 'brix' not in r:
-            if any(kw in name for kw in ['농축','페이스트']): r['brix'] = bx * 4
-            elif '착즙' in name or '퓨레' in name: r['brix'] = bx
-            elif '과즙' in name: r['brix'] = bx
-            r['ph'] = 3.5; r['acidity'] = 0.5
-            break
-    # 당류
-    sug = {'백설탕':(99.9,1.0),'황설탕':(99,1.0),'과당':(77,1.7),'액상과당':(77,1.5),'HFCS':(77,1.5),
-        '포도당':(91,0.7),'올리고당':(75,0.5),'물엿':(75,0.4),'꿀':(80,1.0),'스테비아':(0,300),
-        '수크랄로스':(0,600),'아스파탐':(0,200),'에리스리톨':(0,0.7),'자일리톨':(0,1.0),'알룰로스':(70,0.7),
-        '트레할로스':(0,0.45),'소르비톨':(70,0.6),'말티톨':(75,0.9)}
-    for kw,(bx,sw) in sug.items():
-        if kw in name:
-            r['brix']=bx; r['sweetness']=sw; r['ph']=7.0; r['acidity']=0
-            break
-    # 산미료
-    acid = {'구연산':(2.2,100,1.0),'사과산':(2.3,95.5,0.955),'말산':(2.3,95.5,0.955),
-        '주석산':(2.0,85.3,0.853),'젖산':(2.4,71.1,0.711),'인산':(1.6,196.1,1.961),
-        '아스코르빈':(2.7,36.4,0.364),'비타민C':(2.7,36.4,0.364),'초산':(2.8,106.7,1.067),'빙초산':(2.4,106.7,1.067)}
-    for kw,(ph,ac,a1) in acid.items():
-        if kw in name:
-            r['ph']=ph; r['acidity']=ac; r['acid_1pct']=a1; r['brix']=r.get('brix',0)
-            break
-    # 안정제
-    stab = ['펙틴','카라기난','잔탄검','구아검','로커스트','CMC','젤라틴','한천','알긴산','타마린드']
-    for kw in stab:
-        if kw in name:
-            r['brix']=r.get('brix',0); r['ph']=r.get('ph',7.0); r['acidity']=0
-            break
-    # 향료
-    if '향' in name or '플레이버' in name or '에센스' in name:
-        r['brix']=0; r['ph']=7.0; r['acidity']=0
-    return r if r else None
-
-# ============================================================
-# GEMINI API (모델 업데이트)
-# ============================================================
-GEMINI_MODELS = ["gemini-2.5-flash-preview-04-17","gemini-2.0-flash-001","gemini-1.5-flash"]
-
-def call_gemini(api_key, prompt):
-    import urllib.request, urllib.error
-    for model in GEMINI_MODELS:
-        url=f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-        body=json.dumps({"contents":[{"parts":[{"text":prompt}]}],
-            "generationConfig":{"temperature":0.7,"topP":0.9,"maxOutputTokens":4096}}).encode()
-        req=urllib.request.Request(url,data=body,headers={"Content-Type":"application/json"})
-        try:
-            with urllib.request.urlopen(req,timeout=60) as resp:
-                r=json.loads(resp.read().decode())
-                return r['candidates'][0]['content']['parts'][0]['text'], None
-        except urllib.error.HTTPError as e:
-            code=e.code
-            if code==404: continue  # 모델 없으면 다음 시도
-            return None, f"API오류({code}): {e.read().decode()[:200] if e.fp else ''}"
-        except Exception as e:
-            return None, f"연결오류: {str(e)}"
-    return None, "모든 Gemini 모델 사용 불가. API Key를 확인하세요."
-
-def build_raw_context(df):
-    lines=[]
-    for cat in df['원료대분류'].unique():
-        sub=df[df['원료대분류']==cat]; lines.append(f"\n【{cat}】")
-        for _,r in sub.iterrows():
-            lines.append(f"  - {r['원료명']}|Bx:{sf(r.get('Brix(°)')):.0f}|pH:{sf(r.get('pH')):.1f}|산도:{sf(r.get('산도(%)'))}%|감미:{sf(r.get('감미도(설탕대비)'))}|₩{sf(r.get('예상단가(원/kg)')):,.0f}")
-    return "\n".join(lines)
-
-def build_rec_prompt(bt,fl,std,tb,ta,tc,raw_ctx,extra=""):
-    si="규격없음"
-    if std is not None:
-        si=f"당도:{std.get('당도(Brix,°)','—')}|pH:{std.get('pH 범위','—')}|산도:{std.get('산도(%)','—')}|과즙:{std.get('과즙함량(%)','—')}"
-    return f"""당신은 대한민국 식품음료 R&D 수석연구원(경력20년). 관능전문가, 혼합/기능성음료개발.
-
-【요청】유형:{bt}|맛:{fl}|목표Bx:{tb}|목표산도:{ta}%|목표원가:≤{tc:,.0f}원/kg
-【규격】{si}
-【추가】{extra or '없음'}
-
-【원료DB — 반드시 이 목록에서 선택】
-{raw_ctx}
-
-【규칙】원료명정확히사용, 정제수제외15~35%, 규격충족, 관능최우선, 3~12종
-【슬롯】1~4:원재료|5~7:당류|8~12:호료/안정제|13~18:부재료/기타
-
-【JSON만 출력 — 다른텍스트없이】
-```json
-{{"recommendation":[{{"slot":1,"name":"원료명","pct":8.0,"reason":"이유"}},...],
-"expected_brix":11.2,"expected_acidity":0.35,"expected_ph":3.5,
-"expected_cost_per_kg":1350,
-"design_concept":"컨셉","sensory_note":"관능특성","tips":"실무팁"}}
-```"""
-
-def parse_json(text):
-    m=re.search(r'```json\s*(.*?)\s*```',text,re.DOTALL)
-    js=m.group(1) if m else None
-    if not js:
-        m2=re.search(r'\{.*\}',text,re.DOTALL)
-        js=m2.group(0) if m2 else None
-    if not js: return None,"JSON 파싱실패"
-    try: return json.loads(js),None
-    except json.JSONDecodeError as e: return None,f"JSON오류:{e}"
-
-def validate_rec(rec,df):
-    vn=set(df['원료명'].tolist()); ok=[]; w=[]
-    for it in rec.get('recommendation',[]):
-        n=it.get('name','')
-        if n in vn: ok.append(it)
-        else:
-            cs=[x for x in vn if n[:2] in x][:3]
-            w.append(f"⚠️'{n}'DB없음"+(f"→유사:{','.join(cs)}" if cs else ""))
-    return ok,w
-
-# ============================================================
-# OpenAI DALL-E 3 이미지 생성
-# ============================================================
-def call_dalle(api_key, prompt):
-    import urllib.request, urllib.error
-    url="https://api.openai.com/v1/images/generations"
-    body=json.dumps({"model":"dall-e-3","prompt":prompt,"n":1,"size":"1024x1024","quality":"standard"}).encode()
-    req=urllib.request.Request(url,data=body,headers={"Content-Type":"application/json","Authorization":f"Bearer {api_key}"})
+def safe_float(val, default=0.0):
+    """Safely convert any value to float, handling '—', NaN, None, strings."""
+    if val is None:
+        return default
+    if isinstance(val, (int, float)):
+        if pd.notna(val):
+            return float(val)
+        return default
+    s = str(val).strip().replace(',', '')
+    if not s or s in ('—', '-', 'nan', 'None', '', '0'):
+        return default
     try:
-        with urllib.request.urlopen(req,timeout=120) as resp:
-            r=json.loads(resp.read().decode())
-            img_url=r['data'][0]['url']
-            # 이미지 다운로드
-            with urllib.request.urlopen(img_url,timeout=60) as img_resp:
-                img_bytes=img_resp.read()
-            return img_bytes, None
-    except urllib.error.HTTPError as e:
-        return None,f"DALL-E 오류({e.code}): {e.read().decode()[:200] if e.fp else ''}"
-    except Exception as e:
-        return None,f"연결오류: {str(e)}"
+        return float(s)
+    except (ValueError, TypeError):
+        return default
 
-# ============================================================
-# 내보내기
-# ============================================================
-def export_excel(ings,vol,pname,tcost,pkv,mfv,sp):
-    out=io.BytesIO()
-    with pd.ExcelWriter(out,engine='openpyxl') as w:
-        df=pd.DataFrame(ings)
-        if len(df)>0:
-            df['당기여도']=df['배합비(%)']/100*df['Brix']
-            df['산기여도']=df['배합비(%)']/100*df['산도']
-            df['감미기여도']=df['배합비(%)']/100*df['감미도']
-            df['제품단가']=df['단가']*df['배합비(%)']/100
-            df['배합량(g)']=df['배합비(%)']*vol/100
-        meta=pd.DataFrame([{'제품명':pname,'용량(ml)':vol,'원재료비(원/kg)':f"{tcost:,.0f}",'작성일':datetime.now().strftime('%Y-%m-%d')}])
-        meta.to_excel(w,sheet_name='배합표',index=False,startrow=0)
-        if len(df)>0:
-            cols=['구분','원료명','배합비(%)','Brix','산도','감미도','단가','당기여도','산기여도','감미기여도','제품단가','배합량(g)']
-            df[[c for c in cols if c in df.columns]].to_excel(w,sheet_name='배합표',index=False,startrow=3)
-        # 원가
-        cr=[]
-        for i in ings:
-            up=sf(i.get('단가'));pct=sf(i.get('배합비(%)'))
-            cr.append({'항목':i['원료명'],'배합비(%)':pct,'단가(원/kg)':up,'비용(원/kg)':up*pct/100,'비용(원/병)':up*pct/100*vol/1000})
-        pd.DataFrame(cr).to_excel(w,sheet_name='원가계산서',index=False)
-    return out.getvalue()
+def get_raw_material(name, df_raw):
+    match = df_raw[df_raw['원료명'] == name]
+    if len(match) > 0:
+        return match.iloc[0]
+    return None
 
-def export_html(ings,vol,pname,tcost,eph,pkv,mfv,sp):
-    rows=""
-    for i in ings:
-        bc=sf(i.get('배합비(%)'))/100*sf(i.get('Brix'));ac=sf(i.get('배합비(%)'))/100*sf(i.get('산도'))
-        sc=sf(i.get('배합비(%)'))/100*sf(i.get('감미도'));cc=sf(i.get('단가'))*sf(i.get('배합비(%)'))/100
-        amt=sf(i.get('배합비(%)'))*vol/100
-        rows+=f"<tr><td>{i.get('구분','')}</td><td>{i['원료명']}</td><td>{sf(i.get('배합비(%)')):.3f}</td><td>{bc:.2f}</td><td>{ac:.4f}</td><td>{sc:.2f}</td><td>{cc:,.0f}</td><td>{amt:.1f}</td></tr>\n"
-    tb=sum(sf(i.get('배합비(%)'))/100*sf(i.get('Brix')) for i in ings)
-    ta=sum(sf(i.get('배합비(%)'))/100*sf(i.get('산도')) for i in ings)
-    rc=sum(sf(i.get('단가'))*sf(i.get('배합비(%)'))/100*vol/1000 for i in ings)
-    pk=sum(pkv);mf=sum(mfv);tot=rc+pk+mf
-    return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
-<style>body{{font-family:'Malgun Gothic',sans-serif;margin:20px;font-size:11px}}
-table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #333;padding:4px 6px;text-align:center}}
-th{{background:#2c3e50;color:white;font-size:10px}}h1{{text-align:center;color:#2c3e50;font-size:16px}}
-.qt{{background:#ffe0e0;padding:6px;border-radius:4px;margin:8px 0;font-weight:bold;text-align:center}}
-@media print{{body{{margin:8mm}}}}
-</style></head><body>
-<h1>🥤 {pname} — 배합비 & 원가계산서</h1>
-<div style="display:flex;justify-content:space-between;margin:8px 0;font-size:12px;">
-<span>용량: {vol}ml</span><span>작성일: {datetime.now():%Y-%m-%d}</span></div>
-<div class="qt">품질목표 | Brix: {tb:.2f} | 산도: {ta:.4f}% | pH: {eph:.1f} | 원가: {tcost:,.0f}원/kg</div>
-<table><tr><th>구분</th><th>성분</th><th>배합비(%)</th><th>당기여도</th><th>산기여도</th><th>감미기여도</th><th>제품단가</th><th>배합량(g)</th></tr>
-{rows}
-<tr style="font-weight:bold;background:#f5f5f5"><td colspan=2>합계</td><td>100%</td><td>{tb:.2f}</td><td>{ta:.4f}</td><td></td><td>{tcost:,.0f}</td><td>{vol}</td></tr>
-</table>
-<h2 style="font-size:14px;margin-top:15px;">💰 원가계산서</h2>
-<table><tr><th>항목</th><th>금액(원/병)</th></tr>
-<tr><td>원재료비</td><td>{rc:,.0f}</td></tr><tr><td>포장재비</td><td>{pk:,.0f}</td></tr>
-<tr><td>제조경비</td><td>{mf:,.0f}</td></tr>
-<tr style="font-weight:bold;background:#fff3e0"><td>★ 제조원가</td><td>{tot:,.0f}</td></tr>
-<tr><td>소비자가</td><td>{sp:,.0f}</td></tr><tr><td>원가율</td><td>{tot/sp*100:.1f}%</td></tr></table>
-<p style="text-align:center;color:#888;margin-top:15px;font-size:10px">© FoodWell R&D | Gemini AI + OpenAI DALL-E</p>
-</body></html>"""
+def get_standard(bev_type, df_std):
+    match = df_std[df_std['음료유형'] == bev_type]
+    if len(match) > 0:
+        return match.iloc[0]
+    return None
+
+def get_guide(bev_type, flavor, df_guide):
+    prefix = f"{bev_type}_{flavor}_"
+    matches = df_guide[df_guide.iloc[:,0].str.startswith(prefix, na=False)]
+    return matches
+
+def get_mat_value(mat, col):
+    """Safely get a float value from a material Series."""
+    if mat is None:
+        return 0.0
+    try:
+        return safe_float(mat.get(col))
+    except Exception:
+        return 0.0
 
 # ============================================================
 # PAGE: 대시보드
 # ============================================================
 if page == "🏠 대시보드":
     st.title("🥤 음료개발 데이터베이스 v3")
-    c1,c2,c3=st.columns(3)
-    c1.metric("🧬 등록원료",f"{len(data['원료DB'])}종")
-    c2.metric("📏 규격유형",f"{len(data['음료규격기준'])}종")
-    c3.metric("📖 가이드배합",f"{len(data['가이드배합비'])}건")
-    col1,col2=st.columns(2)
+    st.markdown("**FoodWell 음료 R&D 통합 데이터베이스 — Streamlit 인터랙티브 버전**")
+    
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("🧬 등록 원료", f"{len(data['원료DB'])}종")
+    c2.metric("🏪 시장 제품", f"{len(data['시장제품DB'])}건")
+    c3.metric("📏 규격 유형", f"{len(data['음료규격기준'])}종")
+    c4.metric("📖 가이드 배합", f"{len(data['가이드배합비'])}건")
+    
+    st.markdown("---")
+    
+    col1, col2 = st.columns(2)
     with col1:
-        st.markdown("""
-**v3 주요기능**
-- 🤖 Gemini AI 배합비 추천 (20년차 연구원 페르소나)
-- 📐 pKa기반 pH·산도 정밀계산 (31종 보정)
-- 📊 실시간 Brix/pH/산도/감미도 변화 추적
-- 🎨 OpenAI DALL-E 제품이미지 생성
-- 📥 엑셀 + HTML 출력
-- 🔧 원료명 유추 엔진 (DB외 원료 자동추정)
-        """)
+        st.subheader("📂 시트 구성")
+        sheet_info = {
+            "음료유형분류": f"{len(data['음료유형분류'])}행 — 음료 대분류/세부유형/정의",
+            "시장제품DB": f"{len(data['시장제품DB'])}행 — 시장제품 배합/규격 DB",
+            "원료DB": f"{len(data['원료DB'])}행 — 원료 SPEC(Brix/pH/산도/감미도/단가)",
+            "음료규격기준": f"{len(data['음료규격기준'])}행 — 유형별 규격범위",
+            "표준제조공정/HACCP": f"{len(data['HACCP'])}행 — 공정/CCP 관리기준",
+            "자재SPEC참조": "당류/감미료/안정제 SPEC 참조표",
+            "과일Brix참조": "60종 과일 한국/FDA Brix 기준",
+            "가이드배합비DB": f"{len(data['가이드배합비'])}행 — AI추천+실제사례 가이드",
+        }
+        for k, v in sheet_info.items():
+            st.markdown(f"- **{k}**: {v}")
+    
     with col2:
-        st.subheader("원료 대분류 분포")
-        st.bar_chart(data['원료DB']['원료대분류'].value_counts())
+        st.subheader("🧬 원료 대분류 분포")
+        cat_counts = data['원료DB']['원료대분류'].value_counts()
+        st.bar_chart(cat_counts)
+    
+    st.markdown("---")
+    st.subheader("🏪 시장제품 유형 분포")
+    if '대분류' in data['시장제품DB'].columns:
+        prod_counts = data['시장제품DB']['대분류'].value_counts()
+        st.bar_chart(prod_counts)
 
 # ============================================================
 # PAGE: 배합시뮬레이터
 # ============================================================
 elif page == "🧪 배합시뮬레이터":
-    st.title("🧪 배합비 시뮬레이터")
-    df_raw=data['원료DB']; df_std=data['음료규격기준']; df_gd=data['가이드배합비']
-    bev_types=df_std['음료유형'].dropna().tolist()
-
-    # ── 제품정보 + 유형 + 품질목표 (1줄로 컴팩트) ──
-    r1=st.columns([2,1,2,1.5,1])
-    pname=r1[0].text_input("제품명",key="product_name")
-    vol=r1[1].number_input("용량(ml)",key="volume",step=50)
-    bt=r1[2].selectbox("음료유형",bev_types,key="bev_type_idx")
-    flavors=["사과","딸기","포도","오렌지","복숭아","망고","레몬","자몽","블루베리","감귤","유자","키위"]
-    fl=r1[3].selectbox("맛",flavors,key="flavor_idx")
-    cfl=r1[4].text_input("직접입력",key="custom_flavor")
-    eff_fl=cfl if cfl else fl
-
-    # 규격기준 한줄 표시
-    std=get_std(bt,df_std)
+    st.title("🧪 음료 배합비 시뮬레이터")
+    
+    df_raw = data['원료DB']
+    df_std = data['음료규격기준']
+    df_guide = data['가이드배합비']
+    
+    # --- Product Info ---
+    st.markdown("### 📝 제품 기본정보")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        product_name = st.text_input("제품명", "사과과채음료_시제1호")
+    with col2:
+        volume = st.number_input("목표용량(ml)", value=1000, step=50)
+    
+    # --- Type + Flavor Selection ---
+    st.markdown("### 🎯 음료유형 + 맛 선택")
+    col1, col2, col3 = st.columns(3)
+    
+    bev_types = df_std['음료유형'].dropna().tolist()
+    with col1:
+        bev_type = st.selectbox("음료유형", bev_types, index=1)
+    
+    flavors = ["사과","딸기","포도","오렌지","복숭아","망고","레몬","자몽","블루베리","감귤","유자","키위"]
+    with col2:
+        flavor = st.selectbox("맛(Flavor)", flavors, index=0)
+    with col3:
+        custom_flavor = st.text_input("또는 직접입력", "", placeholder="드롭다운에 없는 맛 입력")
+    
+    effective_flavor = custom_flavor if custom_flavor else flavor
+    
+    # Check if guide exists
+    guide_matches = get_guide(bev_type, effective_flavor, df_guide)
+    has_guide = len(guide_matches) > 0
+    
+    if has_guide:
+        st.success(f"✅ **가이드 배합비 있음**: {bev_type} + {effective_flavor} ({len(guide_matches)}건)")
+    else:
+        st.warning(f"⚠️ 가이드 배합비 없음: {bev_type} + {effective_flavor} — 자유 입력하세요")
+    
+    # --- Standards Display ---
+    std = get_standard(bev_type, df_std)
     if std is not None:
-        vals=[f"**당도**:{std.get('당도(Brix,°)','—') if pd.notna(std.get('당도(Brix,°)')) else '—'}",
-              f"**pH**:{std.get('pH 범위','—') if pd.notna(std.get('pH 범위')) else '—'}",
-              f"**산도**:{std.get('산도(%)','—') if pd.notna(std.get('산도(%)')) else '—'}",
-              f"**과즙**:{std.get('과즙함량(%)','—') if pd.notna(std.get('과즙함량(%)')) else '—'}"]
-        st.markdown(f"📏 **규격**: {' | '.join(vals)}")
-
-    # 품질목표 (빨간 라인 스타일 — 엑셀처럼)
-    st.markdown("<div style='background:#FFE0E0;padding:6px 12px;border-radius:4px;border-left:4px solid red;display:flex;gap:20px;align-items:center;'>", unsafe_allow_html=True)
-    qc=st.columns([1,1,1,1])
-    t_brix=qc[0].number_input("🎯목표Brix",key="target_brix",step=0.5)
-    t_acid=qc[1].number_input("🎯목표산도(%)",key="target_acid",step=0.05,format="%.3f")
-    t_sweet=qc[2].text_input("🎯목표감미도",key="target_sweet")
-    t_cost=qc[3].number_input("🎯목표단가(원/kg)",key="target_cost",step=100)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    # ── AI 배합비 추천 ──
-    with st.expander("🤖 AI 배합비 추천 (Gemini)", expanded=False):
-        ac1,ac2=st.columns([3,7])
-        extra=ac1.text_area("추가요청",placeholder="비타민C강화, 저칼로리...",height=60,key="extra_req")
-        ac2.markdown("<div style='background:linear-gradient(135deg,#667eea,#764ba2);color:white;padding:8px 12px;border-radius:6px;font-size:12px;'><b>🧑‍🔬</b> 경력20년 · 관능전문 · 혼합/기능성 · 174종원료 · 식품공전준수</div>",unsafe_allow_html=True)
-        gc1,gc2=st.columns(2)
-        if gc1.button("🚀 AI 배합비 생성",type="primary",use_container_width=True):
-            if not gemini_key: st.error("❌ Gemini API Key 필요")
-            else:
-                with st.spinner("🧑‍🔬 설계중..."):
-                    raw_ctx=build_raw_context(df_raw)
-                    prompt=build_rec_prompt(bt,eff_fl,std,t_brix,t_acid,t_cost,raw_ctx,extra)
-                    resp,err=call_gemini(gemini_key,prompt)
-                    if err: st.error(f"❌ {err}")
-                    else:
-                        rec,pe=parse_json(resp)
-                        if pe: st.error(pe); st.code(resp)
-                        else:
-                            ok,warns=validate_rec(rec,df_raw)
-                            ad={}
-                            for it in ok: ad[it['slot']]={'AI원료':it['name'],'AI%':it['pct'],'reason':it.get('reason','')}
-                            st.session_state['ai_recommendation']=ad
-                            st.session_state['ai_meta']={
-                                'concept':rec.get('design_concept',''),'sensory':rec.get('sensory_note',''),
-                                'tips':rec.get('tips',''),'eb':rec.get('expected_brix',0),
-                                'ea':rec.get('expected_acidity',0),'ep':rec.get('expected_ph',0),
-                                'ec':rec.get('expected_cost_per_kg',0)}
-                            for w in warns: st.warning(w)
-                            st.success(f"✅ {len(ok)}종 추천완료!"); st.rerun()
-        if gc2.button("🗑️ AI초기화",use_container_width=True):
-            st.session_state['ai_recommendation']={}; st.session_state['ai_meta']={}; st.rerun()
-
-        if st.session_state.get('ai_meta'):
-            m=st.session_state['ai_meta']
-            mc=st.columns(4)
-            mc[0].metric("Bx",f"{m.get('eb',0):.1f}"); mc[1].metric("산도",f"{m.get('ea',0):.3f}%")
-            mc[2].metric("pH",f"{m.get('ep',0):.1f}"); mc[3].metric("원가",f"{m.get('ec',0):,.0f}")
-            st.caption(f"💡 {m.get('concept','')} | 👅 {m.get('sensory','')} | 🔧 {m.get('tips','')}")
-
-    # ── 배합표 (엑셀 양식 기반) ──
-    st.markdown("### 📋 배합표")
-    raw_names=[""] + df_raw['원료명'].dropna().tolist()
-    CUSTOM_TAG = "✏️ 직접입력"
-    raw_names_with_custom = ["", CUSTOM_TAG] + df_raw['원료명'].dropna().tolist()
-
-    categories=[("원재료",4),("당류",3),("호료/안정제",5),("부재료/기타",6)]
-    ai_dict=st.session_state.get('ai_recommendation',{})
-    guide_matches = df_gd[df_gd['key'].str.startswith(f"{bt}_{eff_fl}_", na=False)]
-    case_dict={}
-    for _,r in guide_matches.iterrows():
-        s=int(r['slot']); cn=str(r['사례원료명']) if pd.notna(r['사례원료명']) else ''; cp=sf(r['사례배합비(%)'])
-        if cn=='0': cn=''
-        case_dict[s]={'n':cn,'p':cp}
-
-    ingredients=[]; slot_num=0
-
-    # 테이블 헤더
-    hc=st.columns([0.3,2.5,0.8,2,0.7,2,0.7])
-    for i,t in enumerate(["#","성분","배합비(%)","🟣AI추천","AI%","🟢사례","사례%"]):
-        c="#7B68EE" if i in(3,4) else("#2E8B57" if i in(5,6) else "#444")
-        hc[i].markdown(f"<div style='font-size:10px;font-weight:bold;color:{c};text-align:center;background:#f0f0f0;padding:3px;border-radius:3px;'>{t}</div>",unsafe_allow_html=True)
-
-    for cat_name, num_rows in categories:
-        st.markdown(f"<div style='background:#e8eaf6;padding:2px 8px;border-radius:3px;font-size:12px;font-weight:bold;margin:4px 0;'>📌 {cat_name}</div>",unsafe_allow_html=True)
+        st.markdown("### 📏 규격기준 (자동참조)")
+        sc1, sc2, sc3, sc4, sc5 = st.columns(5)
+        sc1.info(f"**당도**: {std.get('당도(Brix,°)','—') if pd.notna(std.get('당도(Brix,°)')) else '—'}")
+        sc2.info(f"**pH**: {std.get('pH 범위','—') if pd.notna(std.get('pH 범위')) else '—'}")
+        sc3.info(f"**산도**: {std.get('산도(%)','—') if pd.notna(std.get('산도(%)')) else '—'}")
+        sc4.info(f"**과즙**: {std.get('과즙함량(%)','—') if pd.notna(std.get('과즙함량(%)')) else '—'}")
+        sc5.info(f"**비고**: {std.get('비고','—') if pd.notna(std.get('비고')) else '—'}")
+    
+    # --- Quality Targets ---
+    st.markdown("### 🎯 품질목표")
+    tc1, tc2, tc3, tc4 = st.columns(4)
+    with tc1:
+        target_brix = st.number_input("목표 당도(Bx)", value=11.0, step=0.5)
+    with tc2:
+        target_acid = st.number_input("목표 산도(%)", value=0.35, step=0.05, format="%.3f")
+    with tc3:
+        target_sweet = st.text_input("목표 감미도", "—")
+    with tc4:
+        target_cost = st.number_input("목표 단가(원/kg)", value=1500, step=100)
+    
+    # --- Formulation Input ---
+    st.markdown("### 🧪 배합비 입력 (100% 기준)")
+    
+    raw_names = [""] + df_raw['원료명'].dropna().tolist()
+    categories = [
+        ("🍎 원재료", 4, "raw"),
+        ("🍬 당류/감미료", 4, "sugar"),
+        ("🧊 안정제/호료", 4, "stabilizer"),
+        ("📦 기타자재", 7, "etc"),
+    ]
+    
+    # Build guide lookup dict
+    guide_dict = {}
+    if has_guide:
+        for _, row in guide_matches.iterrows():
+            slot = safe_float(row.iloc[1], 0)
+            ai_name = row.iloc[3] if pd.notna(row.iloc[3]) else ''
+            ai_pct = safe_float(row.iloc[4])
+            case_name = row.iloc[5] if pd.notna(row.iloc[5]) else ''
+            case_pct = safe_float(row.iloc[6])
+            # Skip if name is '0' or 0
+            if str(ai_name) == '0': ai_name = ''
+            if str(case_name) == '0': case_name = ''
+            guide_dict[int(slot)] = {
+                'AI원료': str(ai_name) if ai_name else '',
+                'AI%': ai_pct if ai_pct > 0 else 0,
+                '사례원료': str(case_name) if case_name else '',
+                '사례%': case_pct if case_pct > 0 else 0,
+            }
+    
+    ingredients = []
+    slot_num = 0
+    
+    for cat_name, num_rows, cat_key in categories:
+        st.markdown(f"**{cat_name}**")
+        
         for i in range(num_rows):
-            slot_num+=1
-            ai=ai_dict.get(slot_num,{}); cs=case_dict.get(slot_num,{})
-            cols=st.columns([0.3,2.5,0.8,2,0.7,2,0.7])
-            cols[0].markdown(f"<div style='padding-top:26px;text-align:center;color:#999;font-size:11px;'>{slot_num}</div>",unsafe_allow_html=True)
-
-            # 원료 선택 (selectbox + 직접입력 옵션)
-            sel_val = cols[1].selectbox("원료",raw_names_with_custom,key=f"raw_{slot_num}",label_visibility="collapsed")
-            actual_name = sel_val
-            # 직접입력 선택시 text_input 표시
-            if sel_val == CUSTOM_TAG:
-                actual_name = cols[1].text_input("원료명입력",key=f"custom_{slot_num}",label_visibility="collapsed",placeholder="원료명 직접입력")
-
-            pct=cols[2].number_input("%",value=0.0,min_value=0.0,max_value=100.0,step=0.1,format="%.3f",key=f"pct_{slot_num}",label_visibility="collapsed")
-
-            # AI추천 표시
-            at=ai.get('AI원료',''); ap=ai.get('AI%','')
-            bg1="#F3E8FF" if at else "#fafafa"
-            cols[3].markdown(f"<div style='font-size:10px;color:#7B68EE;background:{bg1};padding:4px;border-radius:3px;min-height:30px;padding-top:8px;'>{'🟣'+at if at else ''}</div>",unsafe_allow_html=True)
-            cols[4].markdown(f"<div style='font-size:10px;color:#7B68EE;text-align:center;background:{bg1};padding:4px;border-radius:3px;min-height:30px;padding-top:8px;'>{str(ap)+'%' if ap else ''}</div>",unsafe_allow_html=True)
-            # 사례
-            cn=cs.get('n',''); cp=cs.get('p',0)
-            bg2="#E8FFE8" if cn else "#fafafa"
-            cols[5].markdown(f"<div style='font-size:10px;color:#2E8B57;background:{bg2};padding:4px;border-radius:3px;min-height:30px;padding-top:8px;'>{'🟢'+cn if cn else ''}</div>",unsafe_allow_html=True)
-            cols[6].markdown(f"<div style='font-size:10px;color:#2E8B57;text-align:center;background:{bg2};padding:4px;border-radius:3px;min-height:30px;padding-top:8px;'>{str(cp)+'%' if cp and cp>0 else ''}</div>",unsafe_allow_html=True)
-
-            if actual_name and actual_name != CUSTOM_TAG and pct>0:
-                mat=get_raw(actual_name,df_raw)
-                bx=matv(mat,'Brix(°)'); ac=matv(mat,'산도(%)'); sw=matv(mat,'감미도(설탕대비)'); pr=matv(mat,'예상단가(원/kg)')
-                extra_ph=None
-                if mat is None:
-                    inf=infer_from_name(actual_name)
-                    if inf:
-                        bx=inf.get('brix',bx); ac=inf.get('acidity',ac); sw=inf.get('sweetness',sw)
-                        extra_ph=inf.get('ph',None)
-                        st.caption(f"  ↳ 🔧유추: Bx={bx}, 산도={ac}%, 감미={sw}")
-                ingredients.append({'slot':slot_num,'구분':cat_name,'원료명':actual_name,'배합비(%)':pct,
-                    'Brix':bx,'산도':ac,'감미도':sw,'단가':pr,'_ph':extra_ph})
-
-    # 정제수
-    total_pct=sum(i['배합비(%)'] for i in ingredients)
-    water=100.0-total_pct
-    if water>0:
-        ingredients.append({'slot':99,'구분':'정제수','원료명':'정제수','배합비(%)':water,'Brix':0,'산도':0,'감미도':0,'단가':2,'_ph':7.0})
-
-    # ── 합계 & 실시간 판정 ──
+            slot_num += 1
+            guide = guide_dict.get(slot_num, {'AI원료':'','AI%':0,'사례원료':'','사례%':0})
+            
+            cols = st.columns([0.5, 3, 1.5, 2.5, 1, 2.5, 1])
+            with cols[0]:
+                st.markdown(f"<div style='padding-top:30px;text-align:center;color:#888;'>{slot_num}</div>", unsafe_allow_html=True)
+            with cols[1]:
+                name = st.selectbox(f"원료명", raw_names, key=f"raw_{slot_num}", label_visibility="collapsed")
+            with cols[2]:
+                pct = st.number_input(f"배합비%", value=0.0, min_value=0.0, max_value=100.0,
+                                       step=0.1, format="%.3f", key=f"pct_{slot_num}", label_visibility="collapsed")
+            with cols[3]:
+                ai_txt = f"🟣 {guide['AI원료']}" if guide['AI원료'] else ""
+                st.markdown(f"<div style='padding-top:8px;font-size:12px;color:#7B68EE;background:#F3E8FF;border-radius:4px;padding:6px;min-height:36px;'>{ai_txt}</div>", unsafe_allow_html=True)
+            with cols[4]:
+                ai_pct = f"{guide['AI%']}%" if guide['AI%'] else ""
+                st.markdown(f"<div style='padding-top:8px;font-size:12px;color:#7B68EE;text-align:center;background:#F3E8FF;border-radius:4px;padding:6px;min-height:36px;'>{ai_pct}</div>", unsafe_allow_html=True)
+            with cols[5]:
+                case_txt = f"🟢 {guide['사례원료']}" if guide['사례원료'] else ""
+                st.markdown(f"<div style='padding-top:8px;font-size:12px;color:#2E8B57;background:#E8FFE8;border-radius:4px;padding:6px;min-height:36px;'>{case_txt}</div>", unsafe_allow_html=True)
+            with cols[6]:
+                case_pct = f"{guide['사례%']}%" if guide['사례%'] else ""
+                st.markdown(f"<div style='padding-top:8px;font-size:12px;color:#2E8B57;text-align:center;background:#E8FFE8;border-radius:4px;padding:6px;min-height:36px;'>{case_pct}</div>", unsafe_allow_html=True)
+            
+            if name and pct > 0:
+                mat = get_raw_material(name, df_raw)
+                ingredients.append({
+                    'slot': slot_num, '구분': cat_name.split(' ')[1] if ' ' in cat_name else cat_name,
+                    '원료명': name, '배합비(%)': pct,
+                    'Brix': get_mat_value(mat, 'Brix(°)'),
+                    '산도': get_mat_value(mat, '산도(%)'),
+                    '감미도': get_mat_value(mat, '감미도(설탕대비)'),
+                    '단가': get_mat_value(mat, '예상단가(원/kg)'),
+                })
+    
+    # --- 정제수 자동계산 ---
+    total_pct = sum(i['배합비(%)'] for i in ingredients)
+    water_pct = 100.0 - total_pct
+    
+    st.markdown("**💧 정제수**")
+    wc1, wc2 = st.columns([4, 6])
+    with wc1:
+        if water_pct >= 0:
+            st.metric("정제수 배합비", f"{water_pct:.3f}%")
+        else:
+            st.error(f"⚠️ 배합비 초과! {total_pct:.1f}% > 100%")
+    
+    if water_pct > 0:
+        ingredients.append({
+            'slot': 20, '구분': '정제수', '원료명': '정제수',
+            '배합비(%)': water_pct, 'Brix': 0, '산도': 0, '감미도': 0, '단가': 2,
+        })
+    
+    # --- 시뮬레이션 결과 ---
+    st.markdown("---")
+    st.markdown("### 📊 시뮬레이션 결과")
+    
     if ingredients:
-        tb=sum(i['배합비(%)']/100*i['Brix'] for i in ingredients)
-        ta=sum(i['배합비(%)']/100*i['산도'] for i in ingredients)
-        ts=sum(i['배합비(%)']/100*i['감미도'] for i in ingredients)
-        tc=sum(i['배합비(%)']/100*i['단가'] for i in ingredients)
-        eph=estimate_ph(ingredients,df_raw)
-        tpct=sum(i['배합비(%)'] for i in ingredients)
-
-        # 엑셀 스타일 결과 테이블
-        st.markdown("<div style='background:#e8eaf6;padding:2px 8px;border-radius:3px;font-size:12px;font-weight:bold;margin:4px 0;'>📊 시뮬레이션 결과</div>",unsafe_allow_html=True)
-        df_res=pd.DataFrame(ingredients)
-        df_res['당기여도']=df_res['배합비(%)']/100*df_res['Brix']
-        df_res['산기여도']=df_res['배합비(%)']/100*df_res['산도']
-        df_res['감미기여도']=df_res['배합비(%)']/100*df_res['감미도']
-        df_res['제품단가']=df_res['단가']*df_res['배합비(%)']/100
-        df_res['배합량(g)']=df_res['배합비(%)']*vol/100
-        dcols=['구분','원료명','배합비(%)','당기여도','산기여도','감미기여도','제품단가','배합량(g)']
-        st.dataframe(df_res[dcols].style.format({'배합비(%)':'{:.3f}','당기여도':'{:.2f}','산기여도':'{:.4f}','감미기여도':'{:.2f}','제품단가':'{:,.0f}','배합량(g)':'{:.1f}'}),use_container_width=True,hide_index=True,height=250)
-
-        # 합계 & 규격판정 (한줄)
-        st.markdown(f"""<div style='display:flex;gap:8px;flex-wrap:wrap;margin:8px 0;'>
-<div style='background:#e3f2fd;padding:6px 10px;border-radius:4px;font-size:12px;'><b>합계</b> {tpct:.1f}% {'✅' if abs(tpct-100)<0.1 else '⚠️'}</div>
-<div style='background:#fff8e1;padding:6px 10px;border-radius:4px;font-size:12px;'><b>Brix</b> {tb:.2f} {'✅' if std is not None and sf(std.get('Brix_min'))<=tb<=sf(std.get('Brix_max')) and sf(std.get('Brix_max'))>0 else '⚠️'}</div>
-<div style='background:#fff8e1;padding:6px 10px;border-radius:4px;font-size:12px;'><b>산도</b> {ta:.4f}%</div>
-<div style='background:#e8f5e9;padding:6px 10px;border-radius:4px;font-size:12px;'><b>pH</b> {eph:.2f}</div>
-<div style='background:#fff8e1;padding:6px 10px;border-radius:4px;font-size:12px;'><b>감미도</b> {ts:.2f}</div>
-<div style='background:#fce4ec;padding:6px 10px;border-radius:4px;font-size:12px;'><b>원가</b> {tc:,.0f}원/kg {'✅' if tc<=t_cost else '⚠️'}</div>
-<div style='background:#e3f2fd;padding:6px 10px;border-radius:4px;font-size:12px;'><b>정제수</b> {water:.1f}%</div>
-<div style='background:#e3f2fd;padding:6px 10px;border-radius:4px;font-size:12px;'><b>원재료함량</b> {sum(i["배합비(%)"] for i in ingredients if i["slot"]<=4):.1f}%</div>
-</div>""",unsafe_allow_html=True)
-
-        # session 저장
-        st.session_state['ingredients']=ingredients
-        st.session_state['total_cost']=tc
-        st.session_state['est_ph']=eph
-
-        # ── 내보내기 & 이미지 생성 ──
-        st.markdown("---")
-        ex1,ex2,ex3=st.columns(3)
-        try:
-            xlsx=export_excel(ingredients,vol,pname,tc,st.session_state['pack_vals'],st.session_state['mfg_vals'],st.session_state['selling_price'])
-            ex1.download_button("📥 엑셀",xlsx,file_name=f"{pname}_배합표.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
-        except Exception as e: ex1.caption(f"엑셀실패(openpyxl필요)")
-        html=export_html(ingredients,vol,pname,tc,eph,st.session_state['pack_vals'],st.session_state['mfg_vals'],st.session_state['selling_price'])
-        ex2.download_button("📥 인쇄HTML",html.encode(),file_name=f"{pname}_배합표.html",mime="text/html",use_container_width=True)
-
-        # 🎨 제품 이미지
-        with ex3:
-            if st.button("🎨 제품이미지 생성",use_container_width=True):
-                if not openai_key: st.error("❌ OpenAI API Key 필요")
+        # Calculate contributions
+        total_brix = sum(i['배합비(%)'] / 100 * i['Brix'] for i in ingredients)
+        total_acid = sum(i['배합비(%)'] / 100 * i['산도'] for i in ingredients)
+        total_sweet = sum(i['배합비(%)'] / 100 * i['감미도'] for i in ingredients)
+        total_cost = sum(i['배합비(%)'] / 100 * i['단가'] for i in ingredients)
+        total_pct_final = sum(i['배합비(%)'] for i in ingredients)
+        raw_material_pct = sum(i['배합비(%)'] for i in ingredients if i['slot'] <= 4) / 100
+        num_ingredients = len([i for i in ingredients if i['원료명'] != '정제수'])
+        
+        # Results with standards check
+        rc1, rc2, rc3, rc4 = st.columns(4)
+        
+        # 배합비 합계
+        with rc1:
+            if abs(total_pct_final - 100) < 0.1:
+                st.success(f"**배합비 합계**: {total_pct_final:.1f}%\n✅ 100% 충족")
+            else:
+                st.error(f"**배합비 합계**: {total_pct_final:.1f}%\n⚠️ 조정필요")
+        
+        # 당도 vs 규격
+        with rc2:
+            brix_status = ""
+            if std is not None:
+                bmin = safe_float(std.get('Brix_min'))
+                bmax = safe_float(std.get('Brix_max'))
+                if bmin > 0 and bmax > 0:
+                    if bmin <= total_brix <= bmax:
+                        brix_status = f"✅ 규격이내({std.get('당도(Brix,°)','—')}°)"
+                    elif total_brix < bmin:
+                        brix_status = f"⚠️ 하한미달({std.get('당도(Brix,°)','—')}°)"
+                    else:
+                        brix_status = f"⚠️ 상한초과({std.get('당도(Brix,°)','—')}°)"
+            st.metric("예상 당도(Bx)", f"{total_brix:.2f}")
+            st.caption(brix_status)
+        
+        # 산도 vs 규격
+        with rc3:
+            acid_status = ""
+            if std is not None:
+                amin = safe_float(std.get('산도_min'))
+                amax = safe_float(std.get('산도_max'))
+                if amin > 0 or amax > 0:
+                    if amin <= total_acid <= amax:
+                        acid_status = f"✅ 규격이내({std.get('산도(%)','—')}%)"
+                    else:
+                        acid_status = f"⚠️ 규격벗어남({std.get('산도(%)','—')}%)"
                 else:
-                    main_ings=[i['원료명'] for i in ingredients if i['slot']<=4 and i['원료명']!='정제수']
-                    color_map={'사과':'golden amber','딸기':'pink red','포도':'deep purple','오렌지':'bright orange',
-                        '복숭아':'peach','망고':'yellow-orange','레몬':'pale yellow','자몽':'pink','블루베리':'dark purple'}
-                    clr=color_map.get(eff_fl,'light golden')
-                    img_prompt=f"""Professional product photography of a Korean beverage called "{pname}".
-Clear PET bottle, {vol}ml, containing {bt} with {eff_fl} flavor.
-Liquid color: {clr}, translucent. Fresh {eff_fl} fruits as decoration props.
-Clean modern Korean label with "{pname}" text.
-Studio lighting, white background, slight reflection, premium commercial quality, 4K, photorealistic."""
-                    with st.spinner("🎨 DALL-E 생성중..."):
-                        img,ierr=call_dalle(openai_key,img_prompt)
-                        if ierr: st.error(f"❌ {ierr}")
-                        elif img:
-                            st.session_state['product_image']=img
-                            st.rerun()
-
-        if st.session_state.get('product_image'):
-            st.image(st.session_state['product_image'],caption=f"🎨 {pname} AI제품이미지",use_container_width=True)
-            st.download_button("📥 이미지저장",st.session_state['product_image'],file_name=f"{pname}_제품이미지.png",mime="image/png")
+                    acid_status = "ℹ️ 산도규격 없음"
+            st.metric("예상 산도(%)", f"{total_acid:.4f}")
+            st.caption(acid_status)
+        
+        # 원가
+        with rc4:
+            cost_status = "✅ 목표이내" if total_cost <= target_cost else f"⚠️ 초과 +{total_cost-target_cost:.0f}원"
+            st.metric("원재료비(원/kg)", f"{total_cost:,.0f}")
+            st.caption(cost_status)
+        
+        # Additional info
+        rc5, rc6, rc7, rc8 = st.columns(4)
+        rc5.metric("원재료비(원/병)", f"{total_cost*volume/1000:,.0f}")
+        rc6.metric("원료 종류", f"{num_ingredients}종")
+        rc7.metric("정제수 비율", f"{water_pct:.1f}%")
+        rc8.metric("원재료함량", f"{raw_material_pct*100:.1f}%")
+        
+        # pH/과즙 참조
+        if std is not None:
+            ph_range = str(std.get('pH 범위', '—')) if pd.notna(std.get('pH 범위')) else '—'
+            juice_std = str(std.get('과즙함량(%)', '—')) if pd.notna(std.get('과즙함량(%)')) else '—'
+            st.info(f"ℹ️ **pH 규격**: {ph_range} → 배합후 실측 필요 | **과즙함량 기준**: {juice_std} | 현재 원재료함량: {raw_material_pct*100:.1f}%")
+        
+        # Detailed table
+        st.markdown("#### 📋 배합 상세표")
+        df_result = pd.DataFrame(ingredients)
+        df_result['당기여(Bx)'] = df_result['배합비(%)'] / 100 * df_result['Brix']
+        df_result['산기여(%)'] = df_result['배합비(%)'] / 100 * df_result['산도']
+        df_result['감미기여'] = df_result['배합비(%)'] / 100 * df_result['감미도']
+        df_result['단가기여(원/kg)'] = df_result['배합비(%)'] / 100 * df_result['단가']
+        df_result['배합량(g/kg)'] = df_result['배합비(%)'] * 10
+        
+        display_cols = ['구분','원료명','배합비(%)','당기여(Bx)','산기여(%)','감미기여','단가기여(원/kg)','배합량(g/kg)']
+        st.dataframe(df_result[display_cols].style.format({
+            '배합비(%)': '{:.3f}', '당기여(Bx)': '{:.2f}', '산기여(%)': '{:.4f}',
+            '감미기여': '{:.4f}', '단가기여(원/kg)': '{:,.0f}', '배합량(g/kg)': '{:.1f}'
+        }), use_container_width=True, hide_index=True)
+        
+        # Store in session state for cost sheet
+        st.session_state['ingredients'] = ingredients
+        st.session_state['total_cost'] = total_cost
+        st.session_state['volume'] = volume
+        st.session_state['product_name'] = product_name
 
 # ============================================================
 # PAGE: 원가계산서
 # ============================================================
 elif page == "💰 원가계산서":
-    st.title("💰 원가계산서")
-    ings=st.session_state.get('ingredients',[])
-    vol=st.session_state.get('volume',1000)
-    pname=st.session_state.get('product_name','')
-    if not ings: st.warning("⚠️ 배합시뮬레이터 먼저 입력"); st.stop()
-    st.caption(f"제품: {pname} | {vol}ml")
-
-    st.markdown("##### ① 원재료비")
-    rows=[]
-    for i in ings:
-        up=sf(i.get('단가'));pct=sf(i.get('배합비(%)'))
-        rows.append({'항목':i['원료명'],'배합비':f"{pct:.2f}%",'단가':f"{up:,.0f}",'원/병':f"{up*pct/100*vol/1000:,.1f}"})
-    st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True,height=200)
-    rk=sum(sf(i.get('단가'))*sf(i.get('배합비(%)'))/100 for i in ings)
-    rb=rk*vol/1000
-    st.metric("원재료비(원/병)",f"{rb:,.0f}")
-
-    c1,c2=st.columns(2)
-    with c1:
-        st.markdown("##### ② 포장재비")
-        pk_l=["PET용기","PE캡","라벨","박스","빨대","쉬링크"]
-        pk_d=st.session_state.get('pack_vals',[45,8,12,50,0,5])
-        pv=[]
-        for idx in range(6):
-            v=st.number_input(pk_l[idx],value=pk_d[idx],key=f"pk_{idx}",label_visibility="visible")
-            pv.append(v)
-        st.session_state['pack_vals']=pv
-        st.metric("포장재비",f"{sum(pv):,.0f}원/병")
-    with c2:
-        st.markdown("##### ③ 제조경비")
-        mf_l=["인건비","전력/용수","CIP/검사/감가"]
-        mf_d=st.session_state.get('mfg_vals',[20,18,22])
-        mv=[]
-        for idx in range(3):
-            v=st.number_input(mf_l[idx],value=mf_d[idx],key=f"mf_{idx}")
-            mv.append(v)
-        st.session_state['mfg_vals']=mv
-        st.metric("제조경비",f"{sum(mv):,.0f}원/병")
-
+    st.title("💰 음료 제품 원가계산서")
+    
+    ingredients = st.session_state.get('ingredients', [])
+    volume = st.session_state.get('volume', 1000)
+    product_name = st.session_state.get('product_name', '(배합시뮬레이터에서 먼저 입력)')
+    
+    st.markdown(f"**제품명**: {product_name} | **용량**: {volume}ml")
+    
+    if not ingredients:
+        st.warning("⚠️ 배합시뮬레이터에서 먼저 배합비를 입력해주세요.")
+        st.stop()
+    
+    # ① 원재료비
+    st.markdown("### ① 원재료비 (배합시뮬레이터 연동)")
+    raw_cost_data = []
+    for i in ingredients:
+        unit_price = safe_float(i.get('단가'))
+        pct = safe_float(i.get('배합비(%)'))
+        cost_per_bottle = unit_price * (pct / 100) * volume / 1000
+        raw_cost_data.append({
+            '항목': i['원료명'], '배합비': f"{pct:.2f}%",
+            '단가(원/kg)': f"{unit_price:,.0f}", 
+            '사용량(kg/병)': f"{pct/100 * volume/1000:.5f}",
+            '비용(원/병)': f"{cost_per_bottle:,.1f}",
+            '비용(원/kg)': f"{unit_price*pct/100:,.0f}",
+        })
+    
+    df_raw_cost = pd.DataFrame(raw_cost_data)
+    st.dataframe(df_raw_cost, use_container_width=True, hide_index=True)
+    
+    total_raw_per_kg = sum(safe_float(i.get('단가')) * safe_float(i.get('배합비(%)')) / 100 for i in ingredients)
+    total_raw_per_bottle = total_raw_per_kg * volume / 1000
+    st.metric("원재료비 소계(원/병)", f"{total_raw_per_bottle:,.0f}")
+    
+    # ② 포장재비
+    st.markdown("### ② 포장재비")
+    pc1, pc2, pc3, pc4, pc5, pc6 = st.columns(6)
+    pack_bottle = pc1.number_input("PET용기", value=45, key="pk1")
+    pack_cap = pc2.number_input("PE캡", value=8, key="pk2")
+    pack_label = pc3.number_input("라벨", value=12, key="pk3")
+    pack_box = pc4.number_input("박스(원/병)", value=50, key="pk4")
+    pack_straw = pc5.number_input("빨대", value=0, key="pk5")
+    pack_shrink = pc6.number_input("쉬링크", value=5, key="pk6")
+    total_pack = pack_bottle + pack_cap + pack_label + pack_box + pack_straw + pack_shrink
+    st.metric("포장재비 소계(원/병)", f"{total_pack:,.0f}")
+    
+    # ③ 제조경비
+    st.markdown("### ③ 제조경비")
+    mc1, mc2, mc3 = st.columns(3)
+    mfg_labor = mc1.number_input("인건비(직접+간접)", value=20, key="mf1")
+    mfg_utility = mc2.number_input("전력+용수+스팀+냉각", value=18, key="mf2")
+    mfg_other = mc3.number_input("CIP+검사+감가+임차", value=22, key="mf3")
+    total_mfg = mfg_labor + mfg_utility + mfg_other
+    st.metric("제조경비 소계(원/병)", f"{total_mfg:,.0f}")
+    
+    # ④ 총괄 원가 요약
     st.markdown("---")
-    tot=rb+sum(pv)+sum(mv)
-    tc=st.columns(4)
-    tc[0].metric("원재료비",f"{rb:,.0f}원"); tc[1].metric("포장재비",f"{sum(pv):,.0f}원")
-    tc[2].metric("제조경비",f"{sum(mv):,.0f}원"); tc[3].metric("★ 제조원가",f"{tot:,.0f}원/병")
-    sp=st.number_input("소비자가(원)",value=st.session_state.get('selling_price',1500),step=100,key="sp_i")
-    st.session_state['selling_price']=sp
-    if sp>0: st.metric("원가율",f"{tot/sp*100:.1f}%",delta="양호" if tot/sp<0.4 else "높음")
+    st.markdown("### ④ 총괄 원가 요약")
+    total_all = total_raw_per_bottle + total_pack + total_mfg
+    
+    tc1, tc2, tc3, tc4 = st.columns(4)
+    tc1.metric("원재료비", f"{total_raw_per_bottle:,.0f}원/병")
+    tc2.metric("포장재비", f"{total_pack:,.0f}원/병")
+    tc3.metric("제조경비", f"{total_mfg:,.0f}원/병")
+    tc4.metric("★ 제조원가 합계", f"{total_all:,.0f}원/병", delta=f"{total_all*1000/volume:,.0f}원/kg")
+    
+    selling_price = st.number_input("소비자가(원)", value=1500, step=100)
+    if selling_price > 0:
+        cost_ratio = total_all / selling_price * 100
+        status = "양호" if cost_ratio < 40 else ("보통" if cost_ratio < 50 else "높음")
+        st.metric("원가율", f"{cost_ratio:.1f}%", delta=status)
 
-    ec1,ec2=st.columns(2)
-    try:
-        xl=export_excel(ings,vol,pname,st.session_state.get('total_cost',0),pv,mv,sp)
-        ec1.download_button("📥 엑셀",xl,file_name=f"{pname}_원가.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
-    except: pass
-    ht=export_html(ings,vol,pname,st.session_state.get('total_cost',0),st.session_state.get('est_ph',3.5),pv,mv,sp)
-    ec2.download_button("📥 인쇄HTML",ht.encode(),file_name=f"{pname}_원가.html",mime="text/html",use_container_width=True)
+# ============================================================
+# PAGE: 음료유형분류
+# ============================================================
+elif page == "📋 음료유형분류":
+    st.title("📋 음료유형분류")
+    df = data['음료유형분류']
+    
+    search = st.text_input("🔍 검색 (유형명, 정의, 제품명)", "")
+    if search:
+        mask = df.apply(lambda r: r.astype(str).str.contains(search, case=False).any(), axis=1)
+        df = df[mask]
+    
+    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.caption(f"총 {len(df)}개 유형")
+
+# ============================================================
+# PAGE: 시장제품DB
+# ============================================================
+elif page == "🏪 시장제품DB":
+    st.title("🏪 시장제품 데이터베이스")
+    df = data['시장제품DB']
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        cat_filter = st.multiselect("대분류 필터", df['대분류'].dropna().unique().tolist())
+    with col2:
+        sub_filter = st.multiselect("세부유형 필터", df['세부유형'].dropna().unique().tolist() if '세부유형' in df.columns else [])
+    with col3:
+        search = st.text_input("🔍 제품명 검색", "", key="prod_search")
+    
+    if cat_filter:
+        df = df[df['대분류'].isin(cat_filter)]
+    if sub_filter:
+        df = df[df['세부유형'].isin(sub_filter)]
+    if search:
+        mask = df.apply(lambda r: r.astype(str).str.contains(search, case=False).any(), axis=1)
+        df = df[mask]
+    
+    st.dataframe(df, use_container_width=True, hide_index=True, height=500)
+    st.caption(f"총 {len(df)}건")
 
 # ============================================================
 # PAGE: 원료DB
 # ============================================================
 elif page == "🧬 원료DB":
-    st.title("🧬 원료DB")
-    df=data['원료DB']
-    c1,c2,c3=st.columns([1,1,2])
-    cf=c1.multiselect("대분류",df['원료대분류'].dropna().unique().tolist())
-    sf2=c2.multiselect("소분류",df['원료소분류'].dropna().unique().tolist())
-    sr=c3.text_input("🔍 검색",key="rs")
-    if cf: df=df[df['원료대분류'].isin(cf)]
-    if sf2: df=df[df['원료소분류'].isin(sf2)]
-    if sr: df=df[df['원료명'].str.contains(sr,case=False,na=False)]
-    st.dataframe(df,use_container_width=True,hide_index=True,height=450)
-    st.caption(f"{len(df)}종")
-    if len(df)>0:
-        sel=st.selectbox("상세조회",df['원료명'].tolist())
-        if sel:
-            d=df[df['원료명']==sel].iloc[0]
-            dc=st.columns(6)
-            dc[0].metric("Brix",sf(d.get('Brix(°)'))); dc[1].metric("pH",sf(d.get('pH')))
-            dc[2].metric("산도(%)",sf(d.get('산도(%)'))); dc[3].metric("1%pH",sf(d.get('1%당pH(1%용액)')))
-            dc[4].metric("감미도",sf(d.get('감미도(설탕대비)'))); dc[5].metric("단가",f"{sf(d.get('예상단가(원/kg)')):,.0f}")
+    st.title("🧬 원료 데이터베이스")
+    df = data['원료DB']
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        cat_filter = st.multiselect("대분류", df['원료대분류'].dropna().unique().tolist())
+    with col2:
+        sub_filter = st.multiselect("소분류", df['원료소분류'].dropna().unique().tolist())
+    with col3:
+        search = st.text_input("🔍 원료명 검색", "", key="raw_search")
+    
+    if cat_filter:
+        df = df[df['원료대분류'].isin(cat_filter)]
+    if sub_filter:
+        df = df[df['원료소분류'].isin(sub_filter)]
+    if search:
+        mask = df['원료명'].astype(str).str.contains(search, case=False, na=False)
+        df = df[mask]
+    
+    st.dataframe(df, use_container_width=True, hide_index=True, height=500)
+    st.caption(f"총 {len(df)}종")
+    
+    # Detail view
+    if len(df) > 0:
+        st.markdown("---")
+        selected = st.selectbox("📋 상세 조회", df['원료명'].tolist())
+        if selected:
+            detail = df[df['원료명'] == selected].iloc[0]
+            dc1, dc2, dc3, dc4 = st.columns(4)
+            dc1.metric("Brix(°)", safe_float(detail.get('Brix(°)'), '—'))
+            dc2.metric("pH", safe_float(detail.get('pH'), '—'))
+            dc3.metric("산도(%)", safe_float(detail.get('산도(%)'), '—'))
+            dc4.metric("단가(원/kg)", f"{safe_float(detail.get('예상단가(원/kg)')):,.0f}")
+            
+            dc5, dc6, dc7, dc8 = st.columns(4)
+            dc5.metric("감미도", str(detail.get('감미도(설탕대비)', '—')))
+            dc6.metric("공급형태", str(detail.get('공급형태', '—')))
+            dc7.metric("보관조건", str(detail.get('보관조건', '—')))
+            dc8.metric("비고", str(detail.get('비고', '—')))
 
 # ============================================================
 # PAGE: 음료규격기준
 # ============================================================
 elif page == "📏 음료규격기준":
     st.title("📏 음료규격기준")
-    df=data['음료규격기준']
-    hide=['Brix_min','Brix_max','pH_min','pH_max','산도_min','산도_max']
-    st.dataframe(df[[c for c in df.columns if c not in hide]],use_container_width=True,hide_index=True)
+    df = data['음료규격기준']
+    
+    display_cols = [c for c in df.columns if 'min' not in c.lower() and 'max' not in c.lower()]
+    st.dataframe(df[display_cols], use_container_width=True, hide_index=True)
+    
+    st.markdown("---")
+    selected = st.selectbox("유형 선택", df['음료유형'].tolist())
+    if selected:
+        row = df[df['음료유형'] == selected].iloc[0]
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.info(f"**당도**: {row.get('당도(Brix,°)','—') if pd.notna(row.get('당도(Brix,°)')) else '—'}")
+        c2.info(f"**pH**: {row.get('pH 범위','—') if pd.notna(row.get('pH 범위')) else '—'}")
+        c3.info(f"**산도**: {row.get('산도(%)','—') if pd.notna(row.get('산도(%)')) else '—'}")
+        c4.info(f"**과즙함량**: {row.get('과즙함량(%)','—') if pd.notna(row.get('과즙함량(%)')) else '—'}")
+        c5.info(f"**비고**: {row.get('비고','—') if pd.notna(row.get('비고')) else '—'}")
+
+# ============================================================
+# PAGE: HACCP
+# ============================================================
+elif page == "🏭 표준제조공정/HACCP":
+    st.title("🏭 표준제조공정 / HACCP")
+    df = data['HACCP']
+    
+    if '음료유형' in df.columns:
+        type_filter = st.multiselect("음료유형 필터", df['음료유형'].dropna().unique().tolist())
+        if type_filter:
+            df = df[df['음료유형'].isin(type_filter)]
+    
+    if '공정단계' in df.columns:
+        step_filter = st.multiselect("공정단계 필터", df['공정단계'].dropna().unique().tolist())
+        if step_filter:
+            df = df[df['공정단계'].isin(step_filter)]
+    
+    ccp_only = st.checkbox("CCP만 보기")
+    if ccp_only and 'CCP여부' in df.columns:
+        df = df[df['CCP여부'] != 'N']
+    
+    st.dataframe(df, use_container_width=True, hide_index=True, height=500)
+    st.caption(f"총 {len(df)}건")
+
+# ============================================================
+# PAGE: 자재SPEC참조
+# ============================================================
+elif page == "📊 자재SPEC참조":
+    st.title("📊 자재SPEC 참조표")
+    st.markdown("당류 Brix/감미도, 고감미료 감미배수, 안정제/부자재 SPEC")
+    
+    df = data['자재SPEC']
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+# ============================================================
+# PAGE: 과일Brix참조
+# ============================================================
+elif page == "🍎 과일Brix참조":
+    st.title("🍎 과일별 기준 Brix (한국/FDA)")
+    
+    df = data['과일Brix']
+    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.caption("약 60종 과일의 Single Strength Brix 기준값")
 
 # ============================================================
 # PAGE: 가이드배합비DB
 # ============================================================
 elif page == "📖 가이드배합비DB":
-    st.title("📖 가이드배합비DB")
-    df=data['가이드배합비']
-    if len(df)>0:
-        combos=sorted(df['combo'].dropna().unique().tolist())
-        sel=st.selectbox("조합",combos)
-        if sel:
-            ft=df[df['combo']==sel]
-            c1,c2=st.columns(2)
-            with c1:
-                st.markdown("#### 🟣 AI추천")
-                for _,r in ft.iterrows():
-                    n=r['AI원료명'];p=sf(r['AI배합비(%)'])
-                    if n and str(n) not in('0','nan','') and p>0: st.markdown(f"• **{n}**: {p}%")
-            with c2:
-                st.markdown("#### 🟢 사례")
-                for _,r in ft.iterrows():
-                    n=r['사례원료명'];p=sf(r['사례배합비(%)'])
-                    if n and str(n) not in('0','nan','') and p>0: st.markdown(f"• **{n}**: {p}%")
-            st.dataframe(ft,use_container_width=True,hide_index=True)
+    st.title("📖 가이드 배합비 데이터베이스")
+    df = data['가이드배합비']
+    
+    st.markdown("AI추천 배합비와 실제 사례 배합비 가이드 데이터")
+    
+    # Parse keys to get unique combos
+    if len(df) > 0:
+        keys = df.iloc[:,0].dropna().tolist()
+        combos = set()
+        for k in keys:
+            parts = k.rsplit('_', 1)
+            if len(parts) == 2:
+                combos.add(parts[0])
+        
+        combo_list = sorted(combos)
+        selected_combo = st.selectbox("유형+맛 조합 선택", combo_list)
+        
+        if selected_combo:
+            filtered = df[df.iloc[:,0].str.startswith(selected_combo + "_", na=False)]
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("#### 🟣 AI 추천 배합비")
+                ai_data = filtered.copy()
+                if len(ai_data) > 0:
+                    for _, row in ai_data.iterrows():
+                        name = row.iloc[3]
+                        pct = safe_float(row.iloc[4])
+                        cat = row.iloc[2]
+                        if name and str(name) not in ('0','nan','') and pct > 0:
+                            st.markdown(f"- **{name}**: {pct}% ({cat})")
+            
+            with col2:
+                st.markdown("#### 🟢 실제 사례 배합비")
+                case_data = filtered.copy()
+                if len(case_data) > 0:
+                    for _, row in case_data.iterrows():
+                        name = row.iloc[5]
+                        pct = safe_float(row.iloc[6])
+                        cat = row.iloc[2]
+                        if name and str(name) not in ('0','nan','') and pct > 0:
+                            st.markdown(f"- **{name}**: {pct}% ({cat})")
+            
+            st.markdown("---")
+            st.markdown("#### 📋 전체 데이터")
+            st.dataframe(filtered, use_container_width=True, hide_index=True)
+
+# ============================================================
+# FOOTER
+# ============================================================
+st.sidebar.markdown("---")
+st.sidebar.caption("© FoodWell R&D Training\n음료개발 데이터베이스 v3\nPowered by Streamlit")
