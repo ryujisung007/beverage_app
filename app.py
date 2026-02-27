@@ -502,8 +502,7 @@ def page_planner():
     # ── TAB 2: 공정시방서 [개선3,6: 생산관리자 페르소나] ──
     with tabs[1]:
         st.subheader("🏭 공정시방서 / 작업지시서 (SOP)")
-        btype = st.session_state.bev_type.split('(')[0]
-        matched = df_process[df_process['음료유형'].str.contains(btype, na=False)]
+        matched = match_process(st.session_state.bev_type, df_process)
 
         if not matched.empty:
             sop_text = haccp_sop(st.session_state.bev_type, df_process, st.session_state.product_name, st.session_state.slots)
@@ -522,7 +521,7 @@ def page_planner():
     # ── TAB 3: HACCP 6종 [개선3: 식약처 양식] ──
     with tabs[2]:
         st.subheader("📄 HACCP 서류 (식약처 표준양식)")
-        matched = df_process[df_process['음료유형'].str.contains(btype, na=False)]
+        matched = match_process(st.session_state.bev_type, df_process)
 
         if not matched.empty:
             docs = {

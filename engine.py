@@ -466,9 +466,37 @@ def parse_modified_formulation(text):
 # ============================================================
 # 8. HACCP 서류 6종 (식약처 표준양식)
 # ============================================================
+# 공정DB 매칭 맵 (규격DB 유형 → 공정DB 유형)
+_PROCESS_MAP = {
+    '과·채음료': '과·채주스', '과·채주스(100%)': '과·채주스', '과·채주스': '과·채주스',
+    '탄산수': '탄산음료', '탄산음료': '탄산음료',
+    '커피음료(가당)': '커피음료', '커피음료(블랙)': '커피음료', '커피음료': '커피음료',
+    '유산균음료(비살균)': '유산균음료', '유산균음료(살균)': '유산균음료', '유산균음료': '유산균음료',
+    '젤리음료': '젤리음료',
+    '침출차/액상차': '과·채주스', '두유': '유산균음료',
+    '에너지음료': '탄산음료', '이온음료': '과·채주스', '비타민음료': '과·채주스',
+    '혼합음료': '과·채주스', '홍삼음료': '과·채주스', '식혜': '과·채주스',
+}
+
+
+def match_process(bev_type, df_proc):
+    """규격DB 음료유형 → 공정DB 매칭 (폴백 포함)"""
+    bt = bev_type.split('(')[0]
+    # 1차: 직접 매칭
+    m = df_proc[df_proc['음료유형'].str.contains(bt, na=False)]
+    if not m.empty:
+        return m
+    # 2차: 매핑 테이블
+    mapped = _PROCESS_MAP.get(bev_type) or _PROCESS_MAP.get(bt)
+    if mapped:
+        m = df_proc[df_proc['음료유형'].str.contains(mapped, na=False)]
+        if not m.empty:
+            return m
+    # 3차: 과·채주스 폴백 (가장 범용적)
+    return df_proc[df_proc['음료유형'].str.contains('과·채주스', na=False)]
 def haccp_ha_worksheet(bev_type, df_proc):
     """위해분석표"""
-    m = df_proc[df_proc['음료유형'].str.contains(bev_type.split('(')[0], na=False)]
+    m = match_process(bev_type, df_proc)
     if m.empty:
         return "해당 음료유형의 공정 데이터가 없습니다."
     lines = [
@@ -482,7 +510,8 @@ def haccp_ha_worksheet(bev_type, df_proc):
         step = str(p.get('세부공정', '-'))[:12]
         hazard = str(p.get('HACCP 위해요소', '-')).replace('\n', ',')[:17]
         cause = str(p.get('품질관리포인트', '-'))[:14]
-        ccp = '★CCP' if str(p.get('CCP여부', '')).startswith('CCP') else '  -  '
+        ccp_raw = str(p.get('CCP여부', ''))
+        ccp = f'★{ccp_raw}' if ccp_raw.startswith('CCP') else '  -  '
         prev = str(p.get('모니터링방법', '-'))[:13]
         lines.append(f"│ {i:2d} │ {step:<12}│ {hazard:<17}│ {cause:<14}│ {ccp:^8}│ {prev:<13}│")
     lines.append("└────┴────────────┴─────────────────┴──────────────┴────────┴─────────────┘")
@@ -491,7 +520,7 @@ def haccp_ha_worksheet(bev_type, df_proc):
 
 def haccp_ccp_decision_tree(bev_type, df_proc):
     """CCP 결정도"""
-    m = df_proc[df_proc['음료유형'].str.contains(bev_type.split('(')[0], na=False)]
+    m = match_process(bev_type, df_proc)
     if m.empty:
         return "해당 음료유형의 공정 데이터가 없습니다."
     lines = [
@@ -514,7 +543,7 @@ def haccp_ccp_decision_tree(bev_type, df_proc):
 
 def haccp_ccp_plan(bev_type, df_proc):
     """CCP 관리계획서"""
-    m = df_proc[df_proc['음료유형'].str.contains(bev_type.split('(')[0], na=False)]
+    m = match_process(bev_type, df_proc)
     ccp_rows = m[m['CCP여부'].astype(str).str.startswith('CCP')]
     if ccp_rows.empty:
         return "CCP 공정이 없습니다."
@@ -542,7 +571,7 @@ def haccp_ccp_plan(bev_type, df_proc):
 
 def haccp_monitoring_log(bev_type, df_proc):
     """CCP 모니터링 일지 (빈 양식)"""
-    m = df_proc[df_proc['음료유형'].str.contains(bev_type.split('(')[0], na=False)]
+    m = match_process(bev_type, df_proc)
     ccp_rows = m[m['CCP여부'].astype(str).str.startswith('CCP')]
     if ccp_rows.empty:
         return "CCP 공정이 없습니다."
@@ -569,14 +598,15 @@ def haccp_monitoring_log(bev_type, df_proc):
 
 def haccp_flow_diagram(bev_type, df_proc):
     """공정흐름도"""
-    m = df_proc[df_proc['음료유형'].str.contains(bev_type.split('(')[0], na=False)]
+    m = match_process(bev_type, df_proc)
     if m.empty:
         return "해당 음료유형의 공정 데이터가 없습니다."
     lines = [f"공정흐름도 — {bev_type}", "=" * 50]
     prev = False
     for _, p in m.iterrows():
         step = p.get('세부공정', '')
-        ccp = " ★CCP" if str(p.get('CCP여부', '')).startswith('CCP') else ""
+        ccp_raw = str(p.get('CCP여부', ''))
+        ccp = f" ★{ccp_raw}" if ccp_raw.startswith('CCP') else ""
         cond = str(p.get('주요조건/파라미터', ''))[:35]
         if prev:
             lines.extend(["        │", "        ▼"])
@@ -591,7 +621,7 @@ def haccp_flow_diagram(bev_type, df_proc):
 
 def haccp_sop(bev_type, df_proc, product_name="", slots=None):
     """작업표준서 (SOP)"""
-    m = df_proc[df_proc['음료유형'].str.contains(bev_type.split('(')[0], na=False)]
+    m = match_process(bev_type, df_proc)
     if m.empty:
         return "해당 음료유형의 공정 데이터가 없습니다."
     lines = [
@@ -608,7 +638,8 @@ def haccp_sop(bev_type, df_proc, product_name="", slots=None):
             if safe_float(s.get('배합비(%)', 0)) > 0 and s.get('원료명'):
                 lines.append(f"  {i+1:<4} {s['원료명']:<25} {s['배합비(%)']:<10.3f} {safe_float(s.get('배합량(g/kg)', 0)):<12.1f}")
     for _, p in m.iterrows():
-        ccp = " [CCP]" if str(p.get('CCP여부', '')).startswith('CCP') else ""
+        ccp_raw = str(p.get('CCP여부', ''))
+        ccp = f" [{ccp_raw}]" if ccp_raw.startswith('CCP') else ""
         lines.extend([
             f"\n{'─'*70}",
             f"■ {p.get('공정단계', '')} — {p.get('세부공정', '')}{ccp}",
