@@ -5,26 +5,62 @@ import json, os
 st.set_page_config(page_title="🥤 음료개발 데이터베이스 v3", layout="wide", initial_sidebar_state="expanded")
 
 # ============================================================
-# DATA LOADING
+# DATA LOADING — JSON 기반
 # ============================================================
 @st.cache_data
 def load_data():
-    xlsx = "음료개발_데이터베이스_v3.xlsx"
-    if not os.path.exists(xlsx):
-        st.error(f"❌ '{xlsx}' 파일을 앱과 같은 폴더에 넣어주세요.")
+    json_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "beverage_data.json")
+    if not os.path.exists(json_path):
+        st.error("❌ 'beverage_data.json' 파일을 앱과 같은 폴더에 넣어주세요.")
         st.stop()
     
-    sheets = {}
-    xls = pd.ExcelFile(xlsx)
+    with open(json_path, 'r', encoding='utf-8') as f:
+        raw = json.load(f)
     
-    sheets['음료유형분류'] = pd.read_excel(xls, '음료유형분류')
-    sheets['시장제품DB'] = pd.read_excel(xls, '시장제품DB')
-    sheets['원료DB'] = pd.read_excel(xls, '원료DB')
-    sheets['음료규격기준'] = pd.read_excel(xls, '음료규격기준')
-    sheets['HACCP'] = pd.read_excel(xls, '표준제조공정_HACCP')
-    sheets['자재SPEC'] = pd.read_excel(xls, '자재SPEC참조', header=None)
-    sheets['과일Brix'] = pd.read_excel(xls, '과일Brix참조', header=None)
-    sheets['가이드배합비'] = pd.read_excel(xls, '가이드배합비DB')
+    sheets = {}
+    
+    # ── 원료DB ──
+    df_raw = pd.DataFrame(raw['raw_materials'])
+    df_raw.rename(columns={
+        'cat': '원료대분류', 'subcat': '원료소분류', 'name': '원료명',
+        'brix': 'Brix(°)', 'ph': 'pH', 'acidity': '산도(%)',
+        'sweetness': '감미도(설탕대비)', 'component': '주요성분',
+        'form': '공급형태', 'storage': '보관조건', 'price': '예상단가(원/kg)',
+        'brix_1pct': '1%당Brix기여', 'ph_1pct': '1%당pH영향',
+        'acid_1pct': '1%당산도기여', 'sweet_1pct': '1%당감미도기여',
+        'note': '비고',
+    }, inplace=True)
+    sheets['원료DB'] = df_raw
+    
+    # ── 음료규격기준 ──
+    df_std = pd.DataFrame(raw['standards'])
+    df_std.rename(columns={
+        'type': '음료유형',
+        'brix_text': '당도(Brix,°)', 'ph_text': 'pH 범위',
+        'acid_text': '산도(%)', 'juice_text': '과즙함량(%)',
+        'solid_text': '고형분(%)', 'co2_text': '탄산가스(vol)',
+        'note': '비고',
+        'brix_min': 'Brix_min', 'brix_max': 'Brix_max',
+        'ph_min': 'pH_min', 'ph_max': 'pH_max',
+        'acid_min': '산도_min', 'acid_max': '산도_max',
+    }, inplace=True)
+    sheets['음료규격기준'] = df_std
+    
+    # ── 가이드배합비 ──
+    guide_rows = []
+    for combo_key, items in raw['guides'].items():
+        for item in items:
+            guide_rows.append({
+                'key': f"{combo_key}_{item['slot']:02d}",
+                'slot': item['slot'],
+                'cat': item.get('cat', ''),
+                'AI원료명': item.get('ai_name', ''),
+                'AI배합비(%)': item.get('ai_pct', 0),
+                '사례원료명': item.get('case_name', ''),
+                '사례배합비(%)': item.get('case_pct', 0),
+            })
+    df_guide = pd.DataFrame(guide_rows)
+    sheets['가이드배합비'] = df_guide
     
     return sheets
 
@@ -33,7 +69,6 @@ data = load_data()
 # ============================================================
 # SIDEBAR NAVIGATION
 # ============================================================
-st.sidebar.image("https://img.icons8.com/fluency/96/cocktail.png", width=60)
 st.sidebar.title("🥤 음료개발 DB v3")
 st.sidebar.markdown("---")
 
@@ -41,13 +76,8 @@ page = st.sidebar.radio("📂 메뉴 선택", [
     "🏠 대시보드",
     "🧪 배합시뮬레이터",
     "💰 원가계산서",
-    "📋 음료유형분류",
-    "🏪 시장제품DB",
     "🧬 원료DB",
     "📏 음료규격기준",
-    "🏭 표준제조공정/HACCP",
-    "📊 자재SPEC참조",
-    "🍎 과일Brix참조",
     "📖 가이드배합비DB",
 ])
 
@@ -84,7 +114,7 @@ def get_standard(bev_type, df_std):
 
 def get_guide(bev_type, flavor, df_guide):
     prefix = f"{bev_type}_{flavor}_"
-    matches = df_guide[df_guide.iloc[:,0].str.startswith(prefix, na=False)]
+    matches = df_guide[df_guide['key'].str.startswith(prefix, na=False)]
     return matches
 
 def get_mat_value(mat, col):
@@ -103,25 +133,19 @@ if page == "🏠 대시보드":
     st.title("🥤 음료개발 데이터베이스 v3")
     st.markdown("**FoodWell 음료 R&D 통합 데이터베이스 — Streamlit 인터랙티브 버전**")
     
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3 = st.columns(3)
     c1.metric("🧬 등록 원료", f"{len(data['원료DB'])}종")
-    c2.metric("🏪 시장 제품", f"{len(data['시장제품DB'])}건")
-    c3.metric("📏 규격 유형", f"{len(data['음료규격기준'])}종")
-    c4.metric("📖 가이드 배합", f"{len(data['가이드배합비'])}건")
+    c2.metric("📏 규격 유형", f"{len(data['음료규격기준'])}종")
+    c3.metric("📖 가이드 배합", f"{len(data['가이드배합비'])}건")
     
     st.markdown("---")
     
     col1, col2 = st.columns(2)
     with col1:
-        st.subheader("📂 시트 구성")
+        st.subheader("📂 데이터 구성")
         sheet_info = {
-            "음료유형분류": f"{len(data['음료유형분류'])}행 — 음료 대분류/세부유형/정의",
-            "시장제품DB": f"{len(data['시장제품DB'])}행 — 시장제품 배합/규격 DB",
             "원료DB": f"{len(data['원료DB'])}행 — 원료 SPEC(Brix/pH/산도/감미도/단가)",
             "음료규격기준": f"{len(data['음료규격기준'])}행 — 유형별 규격범위",
-            "표준제조공정/HACCP": f"{len(data['HACCP'])}행 — 공정/CCP 관리기준",
-            "자재SPEC참조": "당류/감미료/안정제 SPEC 참조표",
-            "과일Brix참조": "60종 과일 한국/FDA Brix 기준",
             "가이드배합비DB": f"{len(data['가이드배합비'])}행 — AI추천+실제사례 가이드",
         }
         for k, v in sheet_info.items():
@@ -131,12 +155,6 @@ if page == "🏠 대시보드":
         st.subheader("🧬 원료 대분류 분포")
         cat_counts = data['원료DB']['원료대분류'].value_counts()
         st.bar_chart(cat_counts)
-    
-    st.markdown("---")
-    st.subheader("🏪 시장제품 유형 분포")
-    if '대분류' in data['시장제품DB'].columns:
-        prod_counts = data['시장제품DB']['대분류'].value_counts()
-        st.bar_chart(prod_counts)
 
 # ============================================================
 # PAGE: 배합시뮬레이터
@@ -162,7 +180,7 @@ elif page == "🧪 배합시뮬레이터":
     
     bev_types = df_std['음료유형'].dropna().tolist()
     with col1:
-        bev_type = st.selectbox("음료유형", bev_types, index=1)
+        bev_type = st.selectbox("음료유형", bev_types, index=min(1, len(bev_types)-1))
     
     flavors = ["사과","딸기","포도","오렌지","복숭아","망고","레몬","자몽","블루베리","감귤","유자","키위"]
     with col2:
@@ -212,25 +230,24 @@ elif page == "🧪 배합시뮬레이터":
         ("🍎 원재료", 4, "raw"),
         ("🍬 당류/감미료", 4, "sugar"),
         ("🧊 안정제/호료", 4, "stabilizer"),
-        ("📦 기타자재", 7, "etc"),
+        ("📦 기타자재", 8, "etc"),
     ]
     
     # Build guide lookup dict
     guide_dict = {}
     if has_guide:
         for _, row in guide_matches.iterrows():
-            slot = safe_float(row.iloc[1], 0)
-            ai_name = row.iloc[3] if pd.notna(row.iloc[3]) else ''
-            ai_pct = safe_float(row.iloc[4])
-            case_name = row.iloc[5] if pd.notna(row.iloc[5]) else ''
-            case_pct = safe_float(row.iloc[6])
-            # Skip if name is '0' or 0
-            if str(ai_name) == '0': ai_name = ''
-            if str(case_name) == '0': case_name = ''
-            guide_dict[int(slot)] = {
-                'AI원료': str(ai_name) if ai_name else '',
+            slot = int(row['slot'])
+            ai_name = str(row['AI원료명']) if pd.notna(row['AI원료명']) else ''
+            ai_pct = safe_float(row['AI배합비(%)'])
+            case_name = str(row['사례원료명']) if pd.notna(row['사례원료명']) else ''
+            case_pct = safe_float(row['사례배합비(%)'])
+            if ai_name == '0': ai_name = ''
+            if case_name == '0': case_name = ''
+            guide_dict[slot] = {
+                'AI원료': ai_name if ai_name else '',
                 'AI%': ai_pct if ai_pct > 0 else 0,
-                '사례원료': str(case_name) if case_name else '',
+                '사례원료': case_name if case_name else '',
                 '사례%': case_pct if case_pct > 0 else 0,
             }
     
@@ -290,7 +307,7 @@ elif page == "🧪 배합시뮬레이터":
     
     if water_pct > 0:
         ingredients.append({
-            'slot': 20, '구분': '정제수', '원료명': '정제수',
+            'slot': 21, '구분': '정제수', '원료명': '정제수',
             '배합비(%)': water_pct, 'Brix': 0, '산도': 0, '감미도': 0, '단가': 2,
         })
     
@@ -299,7 +316,6 @@ elif page == "🧪 배합시뮬레이터":
     st.markdown("### 📊 시뮬레이션 결과")
     
     if ingredients:
-        # Calculate contributions
         total_brix = sum(i['배합비(%)'] / 100 * i['Brix'] for i in ingredients)
         total_acid = sum(i['배합비(%)'] / 100 * i['산도'] for i in ingredients)
         total_sweet = sum(i['배합비(%)'] / 100 * i['감미도'] for i in ingredients)
@@ -308,17 +324,14 @@ elif page == "🧪 배합시뮬레이터":
         raw_material_pct = sum(i['배합비(%)'] for i in ingredients if i['slot'] <= 4) / 100
         num_ingredients = len([i for i in ingredients if i['원료명'] != '정제수'])
         
-        # Results with standards check
         rc1, rc2, rc3, rc4 = st.columns(4)
         
-        # 배합비 합계
         with rc1:
             if abs(total_pct_final - 100) < 0.1:
                 st.success(f"**배합비 합계**: {total_pct_final:.1f}%\n✅ 100% 충족")
             else:
                 st.error(f"**배합비 합계**: {total_pct_final:.1f}%\n⚠️ 조정필요")
         
-        # 당도 vs 규격
         with rc2:
             brix_status = ""
             if std is not None:
@@ -334,7 +347,6 @@ elif page == "🧪 배합시뮬레이터":
             st.metric("예상 당도(Bx)", f"{total_brix:.2f}")
             st.caption(brix_status)
         
-        # 산도 vs 규격
         with rc3:
             acid_status = ""
             if std is not None:
@@ -350,26 +362,22 @@ elif page == "🧪 배합시뮬레이터":
             st.metric("예상 산도(%)", f"{total_acid:.4f}")
             st.caption(acid_status)
         
-        # 원가
         with rc4:
             cost_status = "✅ 목표이내" if total_cost <= target_cost else f"⚠️ 초과 +{total_cost-target_cost:.0f}원"
             st.metric("원재료비(원/kg)", f"{total_cost:,.0f}")
             st.caption(cost_status)
         
-        # Additional info
         rc5, rc6, rc7, rc8 = st.columns(4)
         rc5.metric("원재료비(원/병)", f"{total_cost*volume/1000:,.0f}")
         rc6.metric("원료 종류", f"{num_ingredients}종")
         rc7.metric("정제수 비율", f"{water_pct:.1f}%")
         rc8.metric("원재료함량", f"{raw_material_pct*100:.1f}%")
         
-        # pH/과즙 참조
         if std is not None:
             ph_range = str(std.get('pH 범위', '—')) if pd.notna(std.get('pH 범위')) else '—'
             juice_std = str(std.get('과즙함량(%)', '—')) if pd.notna(std.get('과즙함량(%)')) else '—'
             st.info(f"ℹ️ **pH 규격**: {ph_range} → 배합후 실측 필요 | **과즙함량 기준**: {juice_std} | 현재 원재료함량: {raw_material_pct*100:.1f}%")
         
-        # Detailed table
         st.markdown("#### 📋 배합 상세표")
         df_result = pd.DataFrame(ingredients)
         df_result['당기여(Bx)'] = df_result['배합비(%)'] / 100 * df_result['Brix']
@@ -384,7 +392,6 @@ elif page == "🧪 배합시뮬레이터":
             '감미기여': '{:.4f}', '단가기여(원/kg)': '{:,.0f}', '배합량(g/kg)': '{:.1f}'
         }), use_container_width=True, hide_index=True)
         
-        # Store in session state for cost sheet
         st.session_state['ingredients'] = ingredients
         st.session_state['total_cost'] = total_cost
         st.session_state['volume'] = volume
@@ -406,7 +413,6 @@ elif page == "💰 원가계산서":
         st.warning("⚠️ 배합시뮬레이터에서 먼저 배합비를 입력해주세요.")
         st.stop()
     
-    # ① 원재료비
     st.markdown("### ① 원재료비 (배합시뮬레이터 연동)")
     raw_cost_data = []
     for i in ingredients:
@@ -428,7 +434,6 @@ elif page == "💰 원가계산서":
     total_raw_per_bottle = total_raw_per_kg * volume / 1000
     st.metric("원재료비 소계(원/병)", f"{total_raw_per_bottle:,.0f}")
     
-    # ② 포장재비
     st.markdown("### ② 포장재비")
     pc1, pc2, pc3, pc4, pc5, pc6 = st.columns(6)
     pack_bottle = pc1.number_input("PET용기", value=45, key="pk1")
@@ -440,7 +445,6 @@ elif page == "💰 원가계산서":
     total_pack = pack_bottle + pack_cap + pack_label + pack_box + pack_straw + pack_shrink
     st.metric("포장재비 소계(원/병)", f"{total_pack:,.0f}")
     
-    # ③ 제조경비
     st.markdown("### ③ 제조경비")
     mc1, mc2, mc3 = st.columns(3)
     mfg_labor = mc1.number_input("인건비(직접+간접)", value=20, key="mf1")
@@ -449,7 +453,6 @@ elif page == "💰 원가계산서":
     total_mfg = mfg_labor + mfg_utility + mfg_other
     st.metric("제조경비 소계(원/병)", f"{total_mfg:,.0f}")
     
-    # ④ 총괄 원가 요약
     st.markdown("---")
     st.markdown("### ④ 총괄 원가 요약")
     total_all = total_raw_per_bottle + total_pack + total_mfg
@@ -465,47 +468,6 @@ elif page == "💰 원가계산서":
         cost_ratio = total_all / selling_price * 100
         status = "양호" if cost_ratio < 40 else ("보통" if cost_ratio < 50 else "높음")
         st.metric("원가율", f"{cost_ratio:.1f}%", delta=status)
-
-# ============================================================
-# PAGE: 음료유형분류
-# ============================================================
-elif page == "📋 음료유형분류":
-    st.title("📋 음료유형분류")
-    df = data['음료유형분류']
-    
-    search = st.text_input("🔍 검색 (유형명, 정의, 제품명)", "")
-    if search:
-        mask = df.apply(lambda r: r.astype(str).str.contains(search, case=False).any(), axis=1)
-        df = df[mask]
-    
-    st.dataframe(df, use_container_width=True, hide_index=True)
-    st.caption(f"총 {len(df)}개 유형")
-
-# ============================================================
-# PAGE: 시장제품DB
-# ============================================================
-elif page == "🏪 시장제품DB":
-    st.title("🏪 시장제품 데이터베이스")
-    df = data['시장제품DB']
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        cat_filter = st.multiselect("대분류 필터", df['대분류'].dropna().unique().tolist())
-    with col2:
-        sub_filter = st.multiselect("세부유형 필터", df['세부유형'].dropna().unique().tolist() if '세부유형' in df.columns else [])
-    with col3:
-        search = st.text_input("🔍 제품명 검색", "", key="prod_search")
-    
-    if cat_filter:
-        df = df[df['대분류'].isin(cat_filter)]
-    if sub_filter:
-        df = df[df['세부유형'].isin(sub_filter)]
-    if search:
-        mask = df.apply(lambda r: r.astype(str).str.contains(search, case=False).any(), axis=1)
-        df = df[mask]
-    
-    st.dataframe(df, use_container_width=True, hide_index=True, height=500)
-    st.caption(f"총 {len(df)}건")
 
 # ============================================================
 # PAGE: 원료DB
@@ -533,7 +495,6 @@ elif page == "🧬 원료DB":
     st.dataframe(df, use_container_width=True, hide_index=True, height=500)
     st.caption(f"총 {len(df)}종")
     
-    # Detail view
     if len(df) > 0:
         st.markdown("---")
         selected = st.selectbox("📋 상세 조회", df['원료명'].tolist())
@@ -558,7 +519,7 @@ elif page == "📏 음료규격기준":
     st.title("📏 음료규격기준")
     df = data['음료규격기준']
     
-    display_cols = [c for c in df.columns if 'min' not in c.lower() and 'max' not in c.lower()]
+    display_cols = [c for c in df.columns if '_min' not in c and '_max' not in c and c not in ('Brix_min','Brix_max','pH_min','pH_max','산도_min','산도_max')]
     st.dataframe(df[display_cols], use_container_width=True, hide_index=True)
     
     st.markdown("---")
@@ -573,50 +534,6 @@ elif page == "📏 음료규격기준":
         c5.info(f"**비고**: {row.get('비고','—') if pd.notna(row.get('비고')) else '—'}")
 
 # ============================================================
-# PAGE: HACCP
-# ============================================================
-elif page == "🏭 표준제조공정/HACCP":
-    st.title("🏭 표준제조공정 / HACCP")
-    df = data['HACCP']
-    
-    if '음료유형' in df.columns:
-        type_filter = st.multiselect("음료유형 필터", df['음료유형'].dropna().unique().tolist())
-        if type_filter:
-            df = df[df['음료유형'].isin(type_filter)]
-    
-    if '공정단계' in df.columns:
-        step_filter = st.multiselect("공정단계 필터", df['공정단계'].dropna().unique().tolist())
-        if step_filter:
-            df = df[df['공정단계'].isin(step_filter)]
-    
-    ccp_only = st.checkbox("CCP만 보기")
-    if ccp_only and 'CCP여부' in df.columns:
-        df = df[df['CCP여부'] != 'N']
-    
-    st.dataframe(df, use_container_width=True, hide_index=True, height=500)
-    st.caption(f"총 {len(df)}건")
-
-# ============================================================
-# PAGE: 자재SPEC참조
-# ============================================================
-elif page == "📊 자재SPEC참조":
-    st.title("📊 자재SPEC 참조표")
-    st.markdown("당류 Brix/감미도, 고감미료 감미배수, 안정제/부자재 SPEC")
-    
-    df = data['자재SPEC']
-    st.dataframe(df, use_container_width=True, hide_index=True)
-
-# ============================================================
-# PAGE: 과일Brix참조
-# ============================================================
-elif page == "🍎 과일Brix참조":
-    st.title("🍎 과일별 기준 Brix (한국/FDA)")
-    
-    df = data['과일Brix']
-    st.dataframe(df, use_container_width=True, hide_index=True)
-    st.caption("약 60종 과일의 Single Strength Brix 기준값")
-
-# ============================================================
 # PAGE: 가이드배합비DB
 # ============================================================
 elif page == "📖 가이드배합비DB":
@@ -625,9 +542,8 @@ elif page == "📖 가이드배합비DB":
     
     st.markdown("AI추천 배합비와 실제 사례 배합비 가이드 데이터")
     
-    # Parse keys to get unique combos
     if len(df) > 0:
-        keys = df.iloc[:,0].dropna().tolist()
+        keys = df['key'].dropna().tolist()
         combos = set()
         for k in keys:
             parts = k.rsplit('_', 1)
@@ -638,30 +554,26 @@ elif page == "📖 가이드배합비DB":
         selected_combo = st.selectbox("유형+맛 조합 선택", combo_list)
         
         if selected_combo:
-            filtered = df[df.iloc[:,0].str.startswith(selected_combo + "_", na=False)]
+            filtered = df[df['key'].str.startswith(selected_combo + "_", na=False)]
             
             col1, col2 = st.columns(2)
             with col1:
                 st.markdown("#### 🟣 AI 추천 배합비")
-                ai_data = filtered.copy()
-                if len(ai_data) > 0:
-                    for _, row in ai_data.iterrows():
-                        name = row.iloc[3]
-                        pct = safe_float(row.iloc[4])
-                        cat = row.iloc[2]
-                        if name and str(name) not in ('0','nan','') and pct > 0:
-                            st.markdown(f"- **{name}**: {pct}% ({cat})")
+                for _, row in filtered.iterrows():
+                    name = row['AI원료명']
+                    pct = safe_float(row['AI배합비(%)'])
+                    cat = row['cat']
+                    if name and str(name) not in ('0','nan','') and pct > 0:
+                        st.markdown(f"- **{name}**: {pct}% ({cat})")
             
             with col2:
                 st.markdown("#### 🟢 실제 사례 배합비")
-                case_data = filtered.copy()
-                if len(case_data) > 0:
-                    for _, row in case_data.iterrows():
-                        name = row.iloc[5]
-                        pct = safe_float(row.iloc[6])
-                        cat = row.iloc[2]
-                        if name and str(name) not in ('0','nan','') and pct > 0:
-                            st.markdown(f"- **{name}**: {pct}% ({cat})")
+                for _, row in filtered.iterrows():
+                    name = row['사례원료명']
+                    pct = safe_float(row['사례배합비(%)'])
+                    cat = row['cat']
+                    if name and str(name) not in ('0','nan','') and pct > 0:
+                        st.markdown(f"- **{name}**: {pct}% ({cat})")
             
             st.markdown("---")
             st.markdown("#### 📋 전체 데이터")
