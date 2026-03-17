@@ -582,9 +582,39 @@ def page_ai_researcher():
 def page_image():
     st.title("🎨 AI 제품 이미지 생성")
     if not OPENAI_KEY: st.error("⚠️ OpenAI API 키 필요"); return
-    prompt = build_dalle_prompt(st.session_state.product_name, st.session_state.bev_type,
-                                st.session_state.slots, st.session_state.container, st.session_state.volume)
-    prompt = st.text_area("프롬프트", prompt, height=100)
+    def build_dalle_prompt(product_name, bev_type, slots, container, volume):
+    """
+    20년차 시니어 AI 전문가가 제안하는 RTD 상품성 극대화 프롬프트 엔진
+    """
+    # 1. 제품 정체성 및 제약 조건 (한글 금지 포함)
+    base_identity = f"A professional product photography of '{product_name}', a {volume} {container}."
+    
+    # 2. 대사(slots)에서 추출한 컨셉을 시각적 레이아웃으로 변환
+    # 대사 내용이 길 경우를 대비해 핵심 묘사를 전면에 배치
+    concept_description = f"The beverage is a {bev_type}, reflecting the concept: '{slots}'."
+    
+    # 3. 상품성 극대화 장치 (나노 바나나 최적화 셋업)
+    # 결로, 역광, 신선한 가니쉬, 세련된 배경을 고정값으로 주입하여 퀄리티 상향 평준화
+    commercial_styling = (
+        "The bottle is chilled with realistic condensation droplets on the surface. "
+        "Intense backlighting to highlight the liquid's vibrant color and transparency. "
+        "The setting is a minimalist, high-end marble tabletop with a soft bokeh background of a modern lifestyle space. "
+        "Fresh ingredients related to the flavor are artistically scattered around the base."
+    )
+    
+    # 4. 품질 및 제약 조건 (한글 절대 금지, 광고 화보급 퀄리티)
+    # 'No text'를 명시하여 라벨의 지저분함을 방지합니다.
+    quality_and_constraints = (
+        "8k resolution, cinematic lighting, advertising masterpiece, hyper-realistic. "
+        "STRICTLY NO KOREAN TEXT, NO LETTERS, CLEAN MINIMALIST LABEL."
+    )
+    
+    # 최종 프롬프트 조립
+    full_prompt = f"{base_identity} {concept_description} {commercial_styling} {quality_and_constraints}"
+    
+    return full_prompt
+    
+    
     if st.button("🎨 이미지 생성", type="primary"):
         with st.spinner("생성 중..."):
             try: st.session_state.generated_image = call_dalle(OPENAI_KEY, prompt)
