@@ -652,13 +652,20 @@ def page_simulator():
                 timeout=60,
             )
             if not resp.ok:
-                # 상세 에러 메시지 출력
                 try:
                     err = resp.json().get("error", {}).get("message", resp.text[:200])
                 except Exception:
                     err = resp.text[:200]
                 raise RuntimeError(f"HTTP {resp.status_code}: {err}")
-            return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+
+            data = resp.json()
+            # 응답 구조 안전 파싱
+            try:
+                return data["candidates"][0]["content"]["parts"][0]["text"]
+            except (KeyError, IndexError) as e:
+                # 실제 응답 구조 디버그 출력
+                import json as _json
+                raise RuntimeError(f"응답 파싱 실패: {e}\n응답 원문: {_json.dumps(data, ensure_ascii=False)[:500]}")
 
         def _parse_changes(text: str):
             import re as _re
