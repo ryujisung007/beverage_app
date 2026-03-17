@@ -92,7 +92,7 @@
 
             url = (
                 "https://generativelanguage.googleapis.com/v1/models/"
-                f"gemini-2.5-pro:generateContent?key={gemini_key}"
+                f"gemini-2.5-flash:generateContent?key={gemini_key}"
             )
             resp = _req.post(url,
                              headers={"Content-Type": "application/json"},
