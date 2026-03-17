@@ -563,10 +563,20 @@ def page_simulator():
 
     def _get_gemini_key():
         try:
-            for k in ("GOOGLE_API_KEY", "GEMINI_API_KEY", "google_api_key"):
+            # 최상위 평탄 구조: GEMINI_API_KEY = "AIza..."
+            for k in ("GOOGLE_API_KEY", "GEMINI_API_KEY", "google_api_key", "gemini_api_key"):
                 v = st.secrets.get(k, "")
-                if v and v.strip():
-                    return v.strip()
+                if v and str(v).strip():
+                    return str(v).strip()
+            # 중첩 섹션 구조: [gemini] / [google]
+            for sec in ("gemini", "google"):
+                try:
+                    for k in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "api_key"):
+                        v = st.secrets[sec].get(k, "")
+                        if v and str(v).strip():
+                            return str(v).strip()
+                except Exception:
+                    pass
         except Exception:
             pass
         return ""
@@ -612,20 +622,25 @@ def page_simulator():
                 "변경 제안 없는 일반 질문은 JSON 없이 텍스트만 답변.\n"
                 "한국어로 답변. 수치는 근거와 함께 제시."
             )
-            contents = []
+            # system_instruction → contents 첫 턴(user+model 쌍)으로 주입
+            contents = [
+                {"role": "user",  "parts": [{"text": system_prompt}]},
+                {"role": "model", "parts": [{"text": "네, 배합표를 확인했습니다. 질문해주세요."}]},
+            ]
             for turn in history[-6:]:
                 contents.append({
                     "role": turn["role"],
                     "parts": [{"text": turn["text"]}]
                 })
             contents.append({"role": "user", "parts": [{"text": user_msg}]})
+
             payload = {
-                "system_instruction": {"parts": [{"text": system_prompt}]},
                 "contents": contents,
                 "generationConfig": {"maxOutputTokens": 1200, "temperature": 0.4},
             }
+            # v1beta 사용 (gemini-2.5-flash 지원)
             url = (
-                "https://generativelanguage.googleapis.com/v1/models/"
+                "https://generativelanguage.googleapis.com/v1beta/models/"
                 f"gemini-2.5-flash:generateContent?key={gemini_key}"
             )
             resp = _req.post(url,
