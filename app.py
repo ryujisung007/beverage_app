@@ -581,10 +581,9 @@ def page_ai_researcher():
 # ============================================================
 def page_image():
     st.title("🎨 AI 제품 이미지 생성")
-    if not OPENAI_KEY:
+if not OPENAI_KEY:
     st.error("⚠️ OpenAI API 키 필요")
     return
-
 prompt = build_dalle_prompt(
     st.session_state.product_name, st.session_state.bev_type,
     st.session_state.slots, st.session_state.container, st.session_state.volume
