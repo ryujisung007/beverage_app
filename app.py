@@ -611,33 +611,36 @@ def page_simulator():
 
             ctx = _build_context()
 
-            # 첫 메시지에만 컨텍스트 + 역할 주입, 이후는 순수 대화
+            # 컨텍스트를 매 질문마다 user 메시지 앞에 주입
             full_msg = (
-                f"[역할] 15년 경력 음료 R&D 수석연구원\n"
-                f"[현재 배합]\n{ctx}\n\n"
-                f"[규칙] 배합 변경 제안 시 답변 끝에 아래 형식 JSON 포함:\n"
+                f"[음료 R&D 수석연구원으로 답변]\n"
+                f"[현재 배합 데이터]\n{ctx}\n\n"
+                f"[배합 변경 제안 시 답변 끝에 포함]\n"
                 f'```json\n{{"changes":[{{"슬롯":1,"원료명":"구연산","배합비":0.15}}]}}\n```\n'
                 f"변경 없는 질문은 JSON 없이 텍스트만. 한국어 답변.\n\n"
-                f"[질문] {user_msg}"
-            ) if not history else user_msg
+                f"질문: {user_msg}"
+            )
 
-            # history role 교대 보정 (user→model→user 순서 강제)
+            # 히스토리 role 교대 보정 (user↔model 엄격히 교대)
             contents = []
+            expected = "user"
             for turn in history[-6:]:
-                role = "model" if turn["role"] == "model" else "user"
+                role = "model" if turn["role"] in ("model", "assistant") else "user"
+                if role != expected:
+                    continue   # 순서 어긋나는 턴 스킵
                 contents.append({"role": role, "parts": [{"text": turn["text"]}]})
+                expected = "model" if expected == "user" else "user"
 
-            # contents가 model로 끝나면 user 추가 가능, user로 끝나면 model 필요
-            # 항상 user로 끝나야 하므로 마지막이 user면 model 더미 삽입
+            # 마지막이 user면 model 더미 삽입
             if contents and contents[-1]["role"] == "user":
-                contents.append({"role": "model", "parts": [{"text": "네."}]})
+                contents.append({"role": "model", "parts": [{"text": "확인했습니다."}]})
 
             contents.append({"role": "user", "parts": [{"text": full_msg}]})
 
             payload = {
                 "contents": contents,
                 "generationConfig": {
-                    "maxOutputTokens": 1200,
+                    "maxOutputTokens": 2048,   # 1200 → 2048
                     "temperature": 0.4,
                 },
             }
@@ -653,19 +656,22 @@ def page_simulator():
             )
             if not resp.ok:
                 try:
-                    err = resp.json().get("error", {}).get("message", resp.text[:200])
+                    err = resp.json().get("error", {}).get("message", resp.text[:300])
                 except Exception:
-                    err = resp.text[:200]
+                    err = resp.text[:300]
                 raise RuntimeError(f"HTTP {resp.status_code}: {err}")
 
             data = resp.json()
-            # 응답 구조 안전 파싱
             try:
-                return data["candidates"][0]["content"]["parts"][0]["text"]
-            except (KeyError, IndexError) as e:
-                # 실제 응답 구조 디버그 출력
-                import json as _json
-                raise RuntimeError(f"응답 파싱 실패: {e}\n응답 원문: {_json.dumps(data, ensure_ascii=False)[:500]}")
+                parts = data["candidates"][0]["content"]["parts"]
+                return parts[0]["text"]
+            except (KeyError, IndexError):
+                # MAX_TOKENS 등으로 parts 없을 때
+                finish = data.get("candidates", [{}])[0].get("finishReason", "UNKNOWN")
+                if finish == "MAX_TOKENS":
+                    raise RuntimeError("응답이 너무 길어 잘렸습니다. 질문을 더 짧게 해보세요.")
+                import json as _j
+                raise RuntimeError(f"응답 파싱 실패 ({finish}): {_j.dumps(data, ensure_ascii=False)[:400]}")
 
         def _parse_changes(text: str):
             import re as _re
