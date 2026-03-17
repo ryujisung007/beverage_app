@@ -638,10 +638,10 @@ def page_simulator():
                 "contents": contents,
                 "generationConfig": {"maxOutputTokens": 1200, "temperature": 0.4},
             }
-            # v1beta 사용 (gemini-2.5-flash 지원)
+            # 메모리 #3 검증: v1 + gemini-2.5-pro
             url = (
-                "https://generativelanguage.googleapis.com/v1beta/models/"
-                f"gemini-2.5-flash:generateContent?key={gemini_key}"
+                "https://generativelanguage.googleapis.com/v1/models/"
+                f"gemini-2.5-pro:generateContent?key={gemini_key}"
             )
             resp = _req.post(url,
                              headers={"Content-Type": "application/json"},
