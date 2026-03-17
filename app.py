@@ -608,45 +608,56 @@ def page_simulator():
 
         def _call_gemini_agent(user_msg: str, history: list) -> str:
             import requests as _req
-            system_prompt = (
-                "당신은 15년 경력의 음료 R&D 수석연구원입니다.\n"
-                "아래 [현재 배합 컨텍스트]를 항상 참고하여 답변하세요.\n\n"
-                f"[현재 배합 컨텍스트]\n{_build_context()}\n\n"
-                "역할:\n"
-                "1. 식품공전·음료 기술 전문 Q&A (탄산가스 함량, 증점제 필요성, 규격 등)\n"
-                "2. 현재 배합 분석 및 개선 제안\n"
-                "3. 배합 변경 제안이 필요하면 답변 끝에 아래 JSON 블록 포함:\n"
-                "```json\n"
-                "{\"changes\": [{\"슬롯\": 3, \"원료명\": \"구연산\", \"배합비\": 0.15}]}\n"
-                "```\n"
-                "변경 제안 없는 일반 질문은 JSON 없이 텍스트만 답변.\n"
-                "한국어로 답변. 수치는 근거와 함께 제시."
-            )
-            # system_instruction → contents 첫 턴(user+model 쌍)으로 주입
-            contents = [
-                {"role": "user",  "parts": [{"text": system_prompt}]},
-                {"role": "model", "parts": [{"text": "네, 배합표를 확인했습니다. 질문해주세요."}]},
-            ]
+
+            ctx = _build_context()
+
+            # 첫 메시지에만 컨텍스트 + 역할 주입, 이후는 순수 대화
+            full_msg = (
+                f"[역할] 15년 경력 음료 R&D 수석연구원\n"
+                f"[현재 배합]\n{ctx}\n\n"
+                f"[규칙] 배합 변경 제안 시 답변 끝에 아래 형식 JSON 포함:\n"
+                f'```json\n{{"changes":[{{"슬롯":1,"원료명":"구연산","배합비":0.15}}]}}\n```\n'
+                f"변경 없는 질문은 JSON 없이 텍스트만. 한국어 답변.\n\n"
+                f"[질문] {user_msg}"
+            ) if not history else user_msg
+
+            # history role 교대 보정 (user→model→user 순서 강제)
+            contents = []
             for turn in history[-6:]:
-                contents.append({
-                    "role": turn["role"],
-                    "parts": [{"text": turn["text"]}]
-                })
-            contents.append({"role": "user", "parts": [{"text": user_msg}]})
+                role = "model" if turn["role"] == "model" else "user"
+                contents.append({"role": role, "parts": [{"text": turn["text"]}]})
+
+            # contents가 model로 끝나면 user 추가 가능, user로 끝나면 model 필요
+            # 항상 user로 끝나야 하므로 마지막이 user면 model 더미 삽입
+            if contents and contents[-1]["role"] == "user":
+                contents.append({"role": "model", "parts": [{"text": "네."}]})
+
+            contents.append({"role": "user", "parts": [{"text": full_msg}]})
 
             payload = {
                 "contents": contents,
-                "generationConfig": {"maxOutputTokens": 1200, "temperature": 0.4},
+                "generationConfig": {
+                    "maxOutputTokens": 1200,
+                    "temperature": 0.4,
+                },
             }
-            # 메모리 #3 검증: v1 + gemini-2.5-pro
             url = (
                 "https://generativelanguage.googleapis.com/v1/models/"
                 f"gemini-2.5-pro:generateContent?key={gemini_key}"
             )
-            resp = _req.post(url,
-                             headers={"Content-Type": "application/json"},
-                             json=payload, timeout=60)
-            resp.raise_for_status()
+            resp = _req.post(
+                url,
+                headers={"Content-Type": "application/json"},
+                json=payload,
+                timeout=60,
+            )
+            if not resp.ok:
+                # 상세 에러 메시지 출력
+                try:
+                    err = resp.json().get("error", {}).get("message", resp.text[:200])
+                except Exception:
+                    err = resp.text[:200]
+                raise RuntimeError(f"HTTP {resp.status_code}: {err}")
             return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
 
         def _parse_changes(text: str):
