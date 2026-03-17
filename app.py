@@ -585,8 +585,7 @@ def page_image():
     prompt = build_dalle_prompt(st.session_state.product_name, st.session_state.bev_type,
                                 st.session_state.slots, st.session_state.container, st.session_state.volume)
     prompt = st.text_area("프롬프트", prompt, height=100)
-    
-        if st.button("🎨 이미지 생성", type="primary"):
+            if st.button("🎨 이미지 생성", type="primary"):
         with st.spinner("생성 중..."):
             try: st.session_state.generated_image = call_dalle(OPENAI_KEY, prompt)
             except Exception as e: st.error(f"실패: {e}")
