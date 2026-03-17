@@ -640,7 +640,7 @@ def page_simulator():
             payload = {
                 "contents": contents,
                 "generationConfig": {
-                    "maxOutputTokens": 2048,   # 1200 → 2048
+                    "maxOutputTokens": 8192,
                     "temperature": 0.4,
                 },
             }
